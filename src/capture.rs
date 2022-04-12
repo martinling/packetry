@@ -284,6 +284,12 @@ impl StandardFeature {
 
 #[derive(Copy, Clone, Debug, Default, Pod, Zeroable)]
 #[repr(C)]
+pub struct Device {
+    pub address: u8,
+}
+
+#[derive(Copy, Clone, Debug, Default, Pod, Zeroable)]
+#[repr(C)]
 pub struct Endpoint {
     pub device_address: u8,
     pub endpoint_number: u8,
@@ -425,7 +431,9 @@ pub struct Capture {
     packet_data: FileVec<u8>,
     transaction_index: HybridIndex,
     transfer_index: FileVec<TransferIndexEntry>,
+    device_index: [i8; USB_MAX_DEVICES],
     endpoint_index: [[i16; USB_MAX_ENDPOINTS]; USB_MAX_DEVICES],
+    devices: FileVec<Device>,
     endpoints: FileVec<Endpoint>,
     endpoint_data: Vec<EndpointData>,
     endpoint_states: FileVec<u8>,
@@ -550,8 +558,10 @@ impl Capture {
             packet_data: FileVec::new().unwrap(),
             transaction_index: HybridIndex::new(1).unwrap(),
             transfer_index: FileVec::new().unwrap(),
+            devices: FileVec::new().unwrap(),
             endpoints: FileVec::new().unwrap(),
             endpoint_data: Vec::new(),
+            device_index: [-1; USB_MAX_DEVICES],
             endpoint_index: [[-1; USB_MAX_ENDPOINTS]; USB_MAX_DEVICES],
             endpoint_states: FileVec::new().unwrap(),
             endpoint_state_index: HybridIndex::new(1).unwrap(),
@@ -698,6 +708,11 @@ impl Capture {
             setup: None,
         };
         self.endpoint_data.push(ep_data);
+        if self.device_index[addr] == -1 {
+            let device = Device { address: addr as u8 };
+            self.device_index[addr] = self.devices.size() as i8;
+            self.devices.push(&device).unwrap();
+        }
         let endpoint = Endpoint {
             device_address: addr as u8,
             endpoint_number: num as u8,
