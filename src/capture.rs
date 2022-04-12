@@ -422,6 +422,10 @@ impl EndpointData {
     }
 }
 
+struct DeviceData {
+    descriptor_index: HybridIndex,
+}
+
 const USB_MAX_DEVICES: usize = 128;
 const USB_MAX_ENDPOINTS: usize = 16;
 
@@ -434,6 +438,7 @@ pub struct Capture {
     device_index: [i8; USB_MAX_DEVICES],
     endpoint_index: [[i16; USB_MAX_ENDPOINTS]; USB_MAX_DEVICES],
     devices: FileVec<Device>,
+    device_data: Vec<DeviceData>,
     endpoints: FileVec<Endpoint>,
     endpoint_data: Vec<EndpointData>,
     endpoint_states: FileVec<u8>,
@@ -559,6 +564,7 @@ impl Capture {
             transaction_index: HybridIndex::new(1).unwrap(),
             transfer_index: FileVec::new().unwrap(),
             devices: FileVec::new().unwrap(),
+            device_data: Vec::new(),
             endpoints: FileVec::new().unwrap(),
             endpoint_data: Vec::new(),
             device_index: [-1; USB_MAX_DEVICES],
@@ -712,6 +718,10 @@ impl Capture {
             let device = Device { address: addr as u8 };
             self.device_index[addr] = self.devices.size() as i8;
             self.devices.push(&device).unwrap();
+            let dev_data = DeviceData {
+                descriptor_index: HybridIndex::new(1).unwrap(),
+            };
+            self.device_data.push(dev_data);
         }
         let endpoint = Endpoint {
             device_address: addr as u8,
