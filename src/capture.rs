@@ -307,13 +307,14 @@ impl TransferIndexEntry {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Default)]
 struct TransactionState {
     first: PID,
     last: PID,
     start: u64,
     count: u64,
     endpoint_id: usize,
+    setup: Option<SetupFields>,
 }
 
 #[derive(Copy, Clone, IntoPrimitive, FromPrimitive, PartialEq)]
@@ -420,7 +421,8 @@ enum DecodeStatus {
 }
 
 impl TransactionState {
-    pub fn status(&self, next: PID) -> DecodeStatus {
+    pub fn status(&mut self, packet: &[u8]) -> DecodeStatus {
+        let next = PID::from(packet[0]);
         use PID::*;
         match (self.first, self.last, next) {
 
@@ -433,8 +435,19 @@ impl TransactionState {
             // Additional SOFs extend this "transaction", more may follow.
             (_, SOF, SOF) => DecodeStatus::CONTINUE,
 
-            // SETUP must be followed by DATA0, wait for ACK to follow.
-            (_, SETUP, DATA0) => DecodeStatus::CONTINUE,
+            // SETUP must be followed by DATA0.
+            (_, SETUP, DATA0) => {
+                // The packet must have the correct size.
+                match packet.len() {
+                    11 => {
+                        self.setup = Some(
+                            SetupFields::from_data_packet(packet));
+                        // Wait for ACK.
+                        DecodeStatus::CONTINUE
+                    },
+                    _ => DecodeStatus::INVALID
+                }
+            }
             // ACK then completes the transaction.
             (SETUP, DATA0, ACK) => DecodeStatus::DONE,
 
@@ -567,7 +580,7 @@ impl Capture {
 
     fn transaction_update(&mut self, packet: &[u8]) {
         let pid = PID::from(packet[0]);
-        match self.transaction_state.status(pid) {
+        match self.transaction_state.status(packet) {
             DecodeStatus::NEW => {
                 self.transaction_end();
                 self.transaction_start(packet);
@@ -626,6 +639,7 @@ impl Capture {
         state.count = 0;
         state.first = PID::Malformed;
         state.last = PID::Malformed;
+        state.setup = None;
     }
 
     fn add_transaction(&mut self) {
