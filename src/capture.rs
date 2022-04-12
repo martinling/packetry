@@ -921,6 +921,9 @@ impl Capture {
                                                   .unwrap();
                         let data_packet_id = setup_packet_id + 1;
                         let data_packet = self.get_packet(data_packet_id);
+                        if data_packet.len() < 11 {
+                            return format!("Malformed control transfer")
+                        };
                         let fields = SetupFields::from_data_packet(&data_packet);
                         let request_type = fields.type_fields.request_type();
                         let direction = fields.type_fields.direction();
