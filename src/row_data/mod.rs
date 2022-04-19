@@ -6,7 +6,7 @@
 
 mod imp;
 
-use gtk::glib;
+use gtk::glib::{self, SignalHandlerId};
 use gtk::subclass::prelude::*;
 use crate::capture;
 
@@ -68,6 +68,8 @@ pub trait GenericRowData<Item> {
     fn child_count(&self, capture: &mut capture::Capture) -> u64;
     fn get_summary(&self) -> String;
     fn get_connectors(&self) -> Option<String>;
+    fn set_handler(&mut self, handler: SignalHandlerId);
+    fn take_handler(&self) -> Option<SignalHandlerId>;
 }
 
 impl GenericRowData<capture::Item> for RowData {
@@ -88,6 +90,14 @@ impl GenericRowData<capture::Item> for RowData {
     fn get_connectors(&self) -> Option<String> {
         Some(self.imp().connectors.borrow().clone())
     }
+
+    fn set_handler(&mut self, handler: SignalHandlerId) {
+        self.imp().handler.replace(Some(handler));
+    }
+
+    fn take_handler(&self) -> Option<SignalHandlerId> {
+        self.imp().handler.take()
+    }
 }
 
 impl GenericRowData<capture::DeviceItem> for DeviceRowData {
@@ -106,6 +116,12 @@ impl GenericRowData<capture::DeviceItem> for DeviceRowData {
     }
 
     fn get_connectors(&self) -> Option<String> {
+        None
+    }
+
+    fn set_handler(&mut self, _handler: SignalHandlerId) {}
+
+    fn take_handler(&self) -> Option<SignalHandlerId> {
         None
     }
 }

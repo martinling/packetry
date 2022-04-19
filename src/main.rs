@@ -73,7 +73,7 @@ fn create_view<Item, Model, RowData>(capture: &Arc<Mutex<Capture>>)
             .downcast::<TreeListRow>()
             .expect("The item has to be a TreeListRow.");
 
-        let row = treelistrow
+        let mut row = treelistrow
             .item()
             .expect("The item has to exist.")
             .downcast::<RowData>()
@@ -114,15 +114,64 @@ fn create_view<Item, Model, RowData>(capture: &Arc<Mutex<Capture>>)
                 None => {}
             };
 
-            expander.connect_expanded_notify(move |expander| {
+            match row.take_handler() {
+                Some(_) => panic!("Handler was already set"),
+                None => {},
+            };
+
+            let handler = expander.connect_expanded_notify(move |expander| {
                 treelistrow.set_expanded(expander.is_expanded());
             });
+
+            row.set_handler(handler);
         } else {
             let tree_expander = container
                 .downcast::<TreeExpander>()
                 .expect("The child must be a TreeExpander.");
 
             tree_expander.set_list_row(Some(&treelistrow));
+        }
+    });
+    factory.connect_unbind(move |_, list_item| {
+        let treelistrow = list_item
+            .item()
+            .expect("The item has to exist.")
+            .downcast::<TreeListRow>()
+            .expect("The item has to be a TreeListRow.");
+
+        let row = treelistrow
+            .item()
+            .expect("The item has to exist.")
+            .downcast::<RowData>()
+            .expect("The item has to be RowData.");
+
+        let container = list_item
+            .child()
+            .expect("The child has to exist");
+
+        if RowData::CONNECTORS {
+            let conn_label = container
+                .first_child()
+                .expect("The child has to exist")
+                .downcast::<Label>()
+                .expect("The child must be a Label.");
+
+            let expander = conn_label
+                .next_sibling()
+                .expect("The child has to exist")
+                .downcast::<Expander>()
+                .expect("The child must be a Expander.");
+
+            match row.take_handler() {
+                Some(handler) => expander.disconnect(handler),
+                None => panic!("Handler was not set")
+            };
+        } else {
+            let tree_expander = container
+                .downcast::<TreeExpander>()
+                .expect("The child must be a TreeExpander.");
+
+            tree_expander.set_list_row(None);
         }
     });
     ListView::new(Some(&selection_model), Some(&factory))

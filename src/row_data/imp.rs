@@ -1,4 +1,4 @@
-use gtk::glib::{self, subclass::prelude::*};
+use gtk::glib::{self, subclass::prelude::*, SignalHandlerId};
 use std::cell::RefCell;
 use crate::capture;
 
@@ -8,6 +8,7 @@ use crate::capture;
 pub struct RowData {
     pub summary: RefCell<String>,
     pub connectors: RefCell<String>,
+    pub handler: RefCell<Option<SignalHandlerId>>,
     pub(super) item: RefCell<Option<capture::Item>>,
 }
 
