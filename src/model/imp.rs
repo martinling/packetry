@@ -74,13 +74,13 @@ impl Model {
             },
             None => return Err(ModelError::CaptureNotSet)
         };
-        let item = cap.get_item(&self.parent.borrow(),
-                                position as u64)?;
-        let summary = match cap.get_summary(&item) {
+        let item = cap.item(&self.parent.borrow(),
+                            position as u64)?;
+        let summary = match cap.item_summary(&item) {
             Ok(string) => string,
             Err(e) => format!("Error: {:?}", e)
         };
-        let connectors = match cap.get_connectors(&item) {
+        let connectors = match cap.item_connectors(&item) {
             Ok(string) => string,
             Err(e) => format!("Error: {:?}", e)
         };
@@ -115,9 +115,9 @@ impl DeviceModel {
             },
             None => return Err(ModelError::CaptureNotSet)
         };
-        let item = cap.get_device_item(&self.parent.borrow(),
-                                       position as u64)?;
-        let summary = match cap.get_device_summary(&item) {
+        let item = cap.device_item(&self.parent.borrow(),
+                                   position as u64)?;
+        let summary = match cap.device_item_summary(&item) {
             Ok(string) => string,
             Err(e) => format!("Error: {:?}", e)
         };
