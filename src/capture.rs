@@ -512,9 +512,8 @@ impl Capture {
         use EndpointState::*;
         use Item::*;
         let endpoint_count = self.endpoints.len() as usize;
-        const MIN_LEN: usize = " └─".len();
-        let string_length = MIN_LEN + endpoint_count;
-        let mut connectors = String::with_capacity(string_length);
+        let max_string_length = endpoint_count + "    └──".len();
+        let mut connectors = String::with_capacity(max_string_length);
         let transfer_id = match item {
             Transfer(i) | Transaction(i, _) | Packet(i, ..) => *i
         };
