@@ -676,9 +676,9 @@ impl Capture {
                         range: Range<EndpointTransactionId>)
         -> Result<ControlTransfer, CaptureError>
     {
-        let ep_traf = self.endpoint_traffic(endpoint_id)?;
-        let transaction_ids =
-            ep_traf.transaction_ids.get_range(range)?;
+        let transaction_ids = self.endpoint_traffic(endpoint_id)?
+                                  .transaction_ids
+                                  .get_range(range)?;
         let setup_transaction_id = transaction_ids.get(0).ok_or(IndexError)?;
         let setup_packet_id =
             self.transaction_index.get(*setup_transaction_id)?;
@@ -834,8 +834,7 @@ impl Capture {
                 )
             },
             DeviceDescriptor(dev) => {
-                let data = self.device_data(dev)?;
-                match data.device_descriptor {
+                match self.device_data(dev)?.device_descriptor {
                     Some(_) => "Device descriptor",
                     None => "No device descriptor"
                 }.to_string()
@@ -853,8 +852,9 @@ impl Capture {
                 "Configuration descriptor".to_string(),
             ConfigurationDescriptorField(dev, conf, field) => {
                 let data = self.device_data(dev)?;
-                let config = data.configuration(conf)?;
-                config.descriptor.field_text(*field, &data.strings)
+                data.configuration(conf)?
+                    .descriptor
+                    .field_text(*field, &data.strings)
             },
             Interface(_, _, iface) => format!(
                 "Interface {}", iface),
@@ -862,24 +862,25 @@ impl Capture {
                 "Interface descriptor".to_string(),
             InterfaceDescriptorField(dev, conf, iface, field) => {
                 let data = self.device_data(dev)?;
-                let config = data.configuration(conf)?;
-                let iface = config.interface(iface)?;
-                iface.descriptor.field_text(*field, &data.strings)
+                data.configuration(conf)?
+                    .interface(iface)?
+                    .descriptor
+                    .field_text(*field, &data.strings)
             },
             EndpointDescriptor(dev, conf, iface, ep) => {
-                let data = self.device_data(dev)?;
-                let config = data.configuration(conf)?;
-                let iface = config.interface(iface)?;
-                let desc = iface.endpoint_descriptor(ep)?;
-                let addr = desc.endpoint_address;
+                let addr = self.device_data(dev)?
+                               .configuration(conf)?
+                               .interface(iface)?
+                               .endpoint_descriptor(ep)?
+                               .endpoint_address;
                 format!("Endpoint {} {}", addr.number(), addr.direction())
             },
             EndpointDescriptorField(dev, conf, iface, ep, field) => {
-                let data = self.device_data(dev)?;
-                let config = data.configuration(conf)?;
-                let iface = config.interface(iface)?;
-                let desc = iface.endpoint_descriptor(ep)?;
-                desc.field_text(*field)
+                self.device_data(dev)?
+                    .configuration(conf)?
+                    .interface(iface)?
+                    .endpoint_descriptor(ep)?
+                    .field_text(*field)
             }
         })
     }
