@@ -35,6 +35,7 @@ mod id;
 mod file_vec;
 mod hybrid_index;
 mod usb;
+mod vec_map;
 
 fn create_view<Item, Model, RowData>(capture: &Arc<Mutex<Capture>>)
         -> ListView
