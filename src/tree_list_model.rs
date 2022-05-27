@@ -5,9 +5,44 @@ use gtk::{gio, glib};
 
 use crate::capture::{Capture, Item};
 
+pub enum NodeType {
+    NoneExpanded,
+    FirstExpanded(TreeNode, u64, u64, TreeNode),
+}
+
+use NodeType::*;
+
 #[derive(Copy, Clone)]
-pub struct TreeNode {
-    pub item: Item,
+pub enum TreeNode {
+    pub item: Option<Item>,
+    pub node_type: NodeType,
+}
+
+impl TreeNode {
+    pub fn get_node(cap: MutexGuard<Capture>, position: u64) -> TreeNode {
+        match self.node_type {
+            NoneExpanded => {
+                let item = cap.get_item(self.item, position).unwrap();
+                TreeNode {
+                    item,
+                    NoneExpanded
+                };
+            },
+            FirstExpanded(node, first, last, next) => {
+                if position <= first {
+                    let item = cap.get_item(self.item, position).unwrap();
+                    TreeNode {
+                        item,
+                        FirstExpanded(position, node)
+                    }
+                } else if position > first && position < last {
+                    node.get_node(cap, position - first)
+                } else {
+                    next.get_node(cap, position - last)
+                }
+            }
+        }
+    }
 }
 
 glib::wrapper! {
@@ -93,10 +128,7 @@ mod imp {
                 },
                 None => return None
             };
-            let item = cap.get_item(&None, position as u64).ok()?;
-            let node = TreeNode {
-                item
-            };
+            let node = self.root.get_node(position as u64);
             Some(RowData::new(node).upcast::<glib::Object>())
         }
     }
