@@ -336,6 +336,7 @@ impl<'cap> Decoder<'cap> {
             data_index: HybridIndex::new(1)?,
             total_data: 0,
             start_index: HybridIndex::new(1)?,
+            progress_index: HybridIndex::new(1)?,
             end_index: HybridIndex::new(1)?,
         });
         let ep_state = EndpointState::Idle as u8;
@@ -754,6 +755,10 @@ impl<'cap> Decoder<'cap> {
                 let ep_traf = self.capture.endpoint_traffic(endpoint_id)?;
                 assert!(ep_traf.end_index.push(item_id)? == ep_transfer_id);
             }
+            // Record the total transactions on this endpoint.
+            let ep_traf = self.capture.endpoint_traffic(endpoint_id)?;
+            let transaction_count = ep_traf.transaction_ids.len();
+            ep_traf.progress_index.push(transaction_count)?;
         }
 
         Ok(item_id)
