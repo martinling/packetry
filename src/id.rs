@@ -52,6 +52,14 @@ impl<T> Sub<u64> for Id<T> {
    }
 }
 
+impl<T> Sub<Id<T>> for Id<T> {
+   type Output = u64;
+
+   fn sub(self, other: Id<T>) -> u64 {
+      self.value - other.value
+   }
+}
+
 impl<T> From<u64> for Id<T> {
    fn from(i: u64) -> Self {
       Id::<T> {
