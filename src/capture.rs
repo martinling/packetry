@@ -666,8 +666,19 @@ pub trait ItemSource<Item> {
     fn child_count(&mut self, parent: &Item) -> Result<u64, CaptureError>;
     fn item_end(&mut self, item_id: Self::ItemId)
         -> Result<Option<Self::ItemId>, CaptureError>;
+    fn find_child(&mut self,
+                  after_item_id: Self::ItemId,
+                  expanded: &dyn Fn(Self::ItemId) -> bool,
+                  index: u64)
+        -> Result<Item, CaptureError>;
     fn summary(&mut self, item: &Item) -> Result<String, CaptureError>;
     fn connectors(&mut self, item: &Item) -> Result<String, CaptureError>;
+}
+
+struct ActiveTransfer {
+    start_item_id: TrafficItemId,
+    endpoint_id: EndpointId,
+    count_range: Range<EndpointTransactionCount>,
 }
 
 impl ItemSource<TrafficItem> for Capture {
@@ -752,6 +763,109 @@ impl ItemSource<TrafficItem> for Capture {
         }
         let end_item_id = ep_traf.end_index.get(ep_transfer_id)?;
         Ok(Some(end_item_id))
+    }
+
+    fn find_child(&mut self,
+                  after_item_id: TrafficItemId,
+                  expanded: &dyn Fn(TrafficItemId) -> bool,
+                  index: u64)
+        -> Result<TrafficItem, CaptureError>
+    {
+        // Identify all the active transfers we have to consider, and the
+        // number of transactions each has in this span.
+        let transfer_id = self.item_index.get(after_item_id)?;
+        let endpoint_state = self.endpoint_state(transfer_id)?;
+        let mut active_transfers = Vec::<ActiveTransfer>::new();
+        let mut total_transactions = 0_u64;
+        for (i, &state) in endpoint_state.iter().enumerate() {
+            use EndpointState::*;
+            if matches!(EndpointState::from(state), Starting | Ongoing) {
+                // There is a transfer ongoing on this endpoint in this span.
+                let endpoint_id = EndpointId::from(i as u64);
+                let ep_traf = self.endpoint_traffic(endpoint_id)?;
+                // Find the ID of the first item indexed on this EP.
+                let first_item_id = ep_traf.start_index.get(0)?;
+                // Calculate the offset to look up this item on this endpoint.
+                let item_offset = after_item_id - first_item_id;
+                // Find the item ID at which the current transfer started.
+                let start_item_id = ep_traf.start_index.get(item_offset)?;
+                if !expanded(start_item_id) {
+                    // This transfer is not expanded, ignore it.
+                    continue;
+                }
+                // Find the transaction counts on this endpoint at the
+                // beginning and end of this span.
+                let count_range =
+                    ep_traf.progress_index.target_range(
+                        item_offset, ep_traf.transaction_ids.len())?;
+                let transaction_count = count_range.len();
+                if transaction_count == 0 {
+                    // This transfer has no transactions in this span.
+                    continue;
+                }
+                active_transfers.push(ActiveTransfer {
+                    endpoint_id,
+                    start_item_id,
+                    count_range,
+                });
+                total_transactions += transaction_count;
+            }
+        }
+
+        if index >= total_transactions {
+            // There can be no transaction with the given index in this span.
+            return Err(IndexError);
+        }
+
+        // Initial simple implementation. Get the next transactions for each
+        // active transfer, choose the earliest, increment the estimate for
+        // that transfer and repeat. This will take O(n) time to find the
+        // transaction with the given index.
+        //
+        // This should be replaced with an O(log n) solution that bisects
+        // the possible counts for each transfer.
+
+        let mut estimated_counts = vec![0_u64; active_transfers.len()];
+        let mut transactions_skipped = 0_u64;
+
+        loop {
+            let mut transaction_ids = Vec::new();
+            let mut range = 0..active_transfers.len();
+            // Get the next transaction ID for each transfer
+            for i in &mut range {
+                let transfer = &active_transfers[i];
+                let count = estimated_counts[i];
+                if count == transfer.count_range.len() {
+                    // This transfer has no more transactions in this span.
+                    continue;
+                }
+                let ep_traf = self.endpoint_traffic(transfer.endpoint_id)?;
+                // Get the next transaction ID for this transfer.
+                let ep_transaction_id =
+                    EndpointTransactionId::from_u64(
+                        transfer.count_range.start + count);
+                let transaction_id =
+                    ep_traf.transaction_ids.get(ep_transaction_id)?;
+                transaction_ids.push(transaction_id);
+            }
+            // Find which transfer yielded the earliest transaction ID,
+            // and increment its count estimate.
+            let first = range.min_by_key(
+                |i| { transaction_ids[*i].value as usize }
+            ).unwrap();
+            estimated_counts[first] += 1;
+            // If we have now reached the requested index, return the
+            // transaction item with the ID we found.
+            if transactions_skipped == index {
+                let span = &active_transfers[first];
+                let transfer_id = self.item_index.get(span.start_item_id)?;
+                let transaction_id = transaction_ids[first];
+                return Ok(
+                    TrafficItem::Transaction(transfer_id, transaction_id));
+            }
+            // Otherwise, skip that transaction and repeat.
+            transactions_skipped += 1;
+        }
     }
 
     fn summary(&mut self, item: &TrafficItem)
@@ -1065,6 +1179,15 @@ impl ItemSource<DeviceItem> for Capture {
         -> Result<Option<DeviceId>, CaptureError>
     {
         Ok(None)
+    }
+
+    fn find_child(&mut self,
+                  _after_item_id: DeviceId,
+                  _expanded: &dyn Fn(DeviceId) -> bool,
+                  _index: u64)
+        -> Result<DeviceItem, CaptureError>
+    {
+        Err(IndexError)
     }
 
     fn summary(&mut self, item: &DeviceItem)
