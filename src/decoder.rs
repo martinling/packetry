@@ -26,6 +26,7 @@ enum DecodeStatus {
 struct EndpointData {
     device_id: DeviceId,
     address: EndpointAddr,
+    start_item: Option<TrafficItemId>,
     active: Option<EndpointTransferId>,
     ended: Option<EndpointTransferId>,
     transaction_count: u64,
@@ -320,6 +321,7 @@ impl<'cap> Decoder<'cap> {
         self.endpoint_data.set(endpoint_id, EndpointData {
             address,
             device_id,
+            start_item: None,
             active: None,
             ended: None,
             transaction_count: 0,
@@ -333,6 +335,7 @@ impl<'cap> Decoder<'cap> {
             transfer_index: HybridIndex::new(1)?,
             data_index: HybridIndex::new(1)?,
             total_data: 0,
+            start_index: HybridIndex::new(1)?,
             end_index: HybridIndex::new(1)?,
         });
         let ep_state = EndpointState::Idle as u8;
@@ -642,7 +645,7 @@ impl<'cap> Decoder<'cap> {
         }
         ep_data.payload.clear();
         let transfer_start_id = self.add_transfer_entry(endpoint_id, true)?;
-        self.add_item(endpoint_id, transfer_start_id)?;
+        self.add_item(endpoint_id, transfer_start_id, true)?;
         Ok(())
     }
 
@@ -672,7 +675,7 @@ impl<'cap> Decoder<'cap> {
             let transfer_end_id =
                 self.add_transfer_entry(endpoint_id, false)?;
             if self.last_item_endpoint != Some(endpoint_id) {
-                self.add_item(endpoint_id, transfer_end_id)?;
+                self.add_item(endpoint_id, transfer_end_id, false)?;
             }
             let ep_data = self.current_endpoint_data_mut()?;
             ep_data.ended = ep_data.active.take();
@@ -723,19 +726,29 @@ impl<'cap> Decoder<'cap> {
         Ok(state_id)
     }
 
-    fn add_item(&mut self, endpoint_id: EndpointId, transfer_id: TransferId)
+    fn add_item(&mut self,
+                item_endpoint_id: EndpointId,
+                transfer_id: TransferId,
+                start: bool)
         -> Result<TrafficItemId, CaptureError>
     {
         let item_id = self.capture.item_index.push(transfer_id)?;
-        self.last_item_endpoint = Some(endpoint_id);
+        self.last_item_endpoint = Some(item_endpoint_id);
 
-        // Look for ended transfers which still need to be linked to an item.
+        // Iterate over endpoints updating indexes.
         let endpoint_count = self.capture.endpoints.len();
         for i in 0..endpoint_count {
             let endpoint_id = EndpointId::from_u64(i);
-            let ep_data = self.endpoint_data
-                .get_mut(endpoint_id)
-                .ok_or(IndexError)?;
+            let ep_data =
+                self.endpoint_data.get_mut(endpoint_id).ok_or(IndexError)?;
+            if start && endpoint_id == item_endpoint_id {
+                ep_data.start_item = Some(item_id);
+            }
+            if let Some(start_item_id) = ep_data.start_item {
+                // Record which item the current transfer started at.
+                let ep_traf = self.capture.endpoint_traffic(endpoint_id)?;
+                ep_traf.start_index.push(start_item_id)?;
+            }
             if let Some(ep_transfer_id) = ep_data.ended.take() {
                 // This transfer has ended and is not yet linked to an item.
                 let ep_traf = self.capture.endpoint_traffic(endpoint_id)?;
