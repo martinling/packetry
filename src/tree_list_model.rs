@@ -10,6 +10,7 @@ use gtk::prelude::{IsA, Cast};
 use gtk::glib::Object;
 use gtk::gio::prelude::ListModelExt;
 
+use rtrees::rbtree::{RBTree, Augment};
 use thiserror::Error;
 
 use crate::capture::{Capture, CaptureError, ItemSource};
@@ -71,8 +72,8 @@ pub struct RootNode<Item> {
     /// then increased/decreased as nodes are expanded/collapsed.
     child_count: u32,
 
-    /// List of expanded child nodes directly below the root.
-    children: BTreeMap<u32, Rc<RefCell<TreeNode<Item>>>>,
+    /// Tree of expanded child nodes directly below the root.
+    children: RBTree<Interval, IntervalEnd, Rc<RefCell<TreeNode<Item>>>>,
 }
 
 pub struct TreeNode<Item> {
@@ -95,6 +96,39 @@ pub struct TreeNode<Item> {
     children: BTreeMap<u32, Rc<RefCell<TreeNode<Item>>>>,
 }
 
+// This can't just be Option<u32> because we need Incomplete ordered last.
+#[derive(Copy, Clone, PartialEq, PartialOrd, Eq, Ord)]
+enum IntervalEnd {
+    Complete(u32),
+    Incomplete
+}
+
+#[derive(Copy, Clone, PartialEq, PartialOrd, Eq, Ord)]
+pub struct Interval {
+    start: u32,
+    end: IntervalEnd,
+}
+
+impl<Item> Augment<IntervalEnd> for
+    RBTree<Interval, IntervalEnd, Rc<RefCell<TreeNode<Item>>>>
+{
+    fn sync_custom_aug(&mut self) {
+        if !self.is_node() {
+            return;
+        }
+        let own = self.key().end;
+        let left = self.left_ref();
+        let right = self.right_ref();
+        let ends = match (left.is_node(), right.is_node()) {
+            (true,  true ) => vec![left.aug_data(), right.aug_data(), own],
+            (true,  false) => vec![left.aug_data(), own],
+            (false, true ) => vec![right.aug_data(), own],
+            (false, false) => vec![own]
+        };
+        self.set_aug_data(*ends.iter().max().unwrap());
+    }
+}
+
 impl<Item> Node<Item> for RootNode<Item> {
     fn item(&self) -> Option<Item> {
         None
@@ -103,21 +137,25 @@ impl<Item> Node<Item> for RootNode<Item> {
     fn children(&self)
         -> Box<dyn Iterator<Item=(u32, &Rc<RefCell<TreeNode<Item>>>)> + '_>
     {
-        Box::new(self.children
-            .iter()
-            .map(|(&index, node)| (index, node))
+        Box::new((&self.children)
+            .into_iter()
+            .map(|(interval, _, node)| (interval.start, node))
         )
     }
 
     fn has_child(&self, index: u32) -> bool {
-        self.children.contains_key(&index)
+        let interval = Interval {
+            start: index,
+            end: IntervalEnd::Complete(index)
+        };
+        self.children.search(interval).is_some()
     }
 
     fn rows_before(&self, index: u32) -> u32 {
-        self.children
-            .iter()
-            .take_while(|(&key, _)| key < index)
-            .map(|(_, node)| node.borrow().child_count)
+        (&self.children)
+            .into_iter()
+            .take_while(|(interval, _, _)| interval.start < index)
+            .map(|(_, _, node)| node.borrow().child_count)
             .sum::<u32>() + index
     }
 
@@ -127,10 +165,14 @@ impl<Item> Node<Item> for RootNode<Item> {
         -> Result<u32, ModelError>
     {
         let node = node_ref.borrow();
+        let interval = Interval {
+            start: node.item_index,
+            end: IntervalEnd::Complete(node.item_index)
+        };
         if expanded {
-            self.children.insert(node.item_index, node_ref.clone());
+            self.children.insert(interval, interval.end, node_ref.clone());
         } else {
-            self.children.remove(&node.item_index);
+            self.children.delete(interval);
         }
         self.propagate_expanded(
             node.child_count,
@@ -280,7 +322,7 @@ where Item: Copy,
             capture: capture.clone(),
             root: Rc::new(RefCell::new(RootNode {
                 child_count: u32::try_from(item_count)?,
-                children: Default::default(),
+                children: RBTree::new(),
             })),
         })
     }
