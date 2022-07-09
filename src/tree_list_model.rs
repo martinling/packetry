@@ -34,7 +34,7 @@ pub trait Node<Item> {
 
     /// Iterator over this node's expanded children.
     fn children(&self)
-        -> Box<dyn Iterator<Item=(&u32, &Rc<RefCell<TreeNode<Item>>>)> + '_>;
+        -> Box<dyn Iterator<Item=(u32, &Rc<RefCell<TreeNode<Item>>>)> + '_>;
 
     /// Whether this node has an expanded child at this index.
     fn has_child(&self, index: u32) -> bool;
@@ -101,9 +101,12 @@ impl<Item> Node<Item> for RootNode<Item> {
     }
 
     fn children(&self)
-        -> Box<dyn Iterator<Item=(&u32, &Rc<RefCell<TreeNode<Item>>>)> + '_>
+        -> Box<dyn Iterator<Item=(u32, &Rc<RefCell<TreeNode<Item>>>)> + '_>
     {
-        Box::new(self.children.iter())
+        Box::new(self.children
+            .iter()
+            .map(|(&index, node)| (index, node))
+        )
     }
 
     fn has_child(&self, index: u32) -> bool {
@@ -160,9 +163,12 @@ where Item: Copy
     }
 
     fn children(&self)
-        -> Box<dyn Iterator<Item=(&u32, &Rc<RefCell<TreeNode<Item>>>)> + '_>
+        -> Box<dyn Iterator<Item=(u32, &Rc<RefCell<TreeNode<Item>>>)> + '_>
     {
-        Box::new(self.children.iter())
+        Box::new(self.children
+            .iter()
+            .map(|(&index, node)| (index, node))
+        )
     }
 
     fn has_child(&self, index: u32) -> bool {
