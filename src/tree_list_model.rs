@@ -381,12 +381,12 @@ where Item: Copy,
     }
 
     pub fn item(&self, position: u32) -> Option<Object> {
-        // First check that the position is valid (must be within the root node's `row_count`).
-        let mut parent_ref: Rc<RefCell<dyn Node<Item>>> = self.root.clone();
-        if position >= self.root.borrow().row_count {
+        // First check that the position is valid.
+        if position >= self.n_items() {
             return None
         }
 
+        let mut parent_ref: Rc<RefCell<dyn Node<Item>>> = self.root.clone();
         let mut relative_position = position;
         'outer: loop {
             for (_, node_rc) in parent_ref.clone().borrow().expanded() {
