@@ -66,10 +66,13 @@ pub trait Node<Item> {
 }
 
 pub struct RootNode<Item> {
+    /// Number of top-level items.
+    item_count: u32,
+
     /// Total number of rows in the model, as currently expanded.
     ///
-    /// Initially this is set to the number of top level items,
-    /// then increased/decreased as items are expanded/collapsed.
+    /// Initially this is equal to the item count, then increases or
+    /// decreases as items are expanded/collapsed.
     row_count: u32,
 
     /// Interval tree of expanded top level items.
@@ -85,6 +88,9 @@ pub struct TreeNode<Item> {
 
     /// Index of this item below its parent item.
     item_index: u32,
+
+    /// Number of child items below this item.
+    item_count: u32,
 
     /// Total number of rows associated with this item.
     ///
@@ -329,12 +335,13 @@ where Item: Copy,
 {
     pub fn new(capture: Arc<Mutex<Capture>>) -> Result<Self, ModelError> {
         let mut cap = capture.lock().or(Err(ModelError::LockError))?;
-        let item_count = cap.item_count(&None)?;
+        let item_count = u32::try_from(cap.item_count(&None)?)?;
         Ok(TreeListModel {
             _marker: PhantomData,
             capture: capture.clone(),
             root: Rc::new(RefCell::new(RootNode {
-                row_count: u32::try_from(item_count)?,
+                item_count,
+                row_count: item_count,
                 expanded: RBTree::new(),
             })),
         })
@@ -408,12 +415,13 @@ where Item: Copy,
         let mut cap = self.capture.lock().ok()?;
         let parent = parent_ref.borrow();
         let item = cap.item(&parent.item(), relative_position as u64).ok()?;
-        let row_count = cap.child_count(&item).ok()?;
+        let item_count = u32::try_from(cap.child_count(&item).ok()?).ok()?;
         let node = TreeNode {
             item,
             parent: Rc::downgrade(&parent_ref),
             item_index: relative_position,
-            row_count: row_count.try_into().ok()?,
+            item_count,
+            row_count: item_count,
             expanded: Default::default(),
         };
         let rowdata = RowData::new(Rc::new(RefCell::new(node)));
