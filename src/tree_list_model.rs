@@ -41,6 +41,9 @@ pub trait Node<Item> {
     /// Whether this node has an expanded child at this index.
     fn has_expanded(&self, index: u32) -> bool;
 
+    /// Total number of rows for this node.
+    fn total_rows(&self) -> u32;
+
     /// Number of rows before the child with this index.
     fn rows_before(&self, index: u32) -> u32;
 
@@ -170,6 +173,16 @@ impl<Item> Node<Item> for RootNode<Item> {
         self.expanded.search(interval).is_some()
     }
 
+    fn total_rows(&self) -> u32 {
+        let child_rows =
+            if self.expanded.is_node() {
+                self.expanded.aug_data().total_rows
+            } else {
+                0
+            };
+        self.item_count + child_rows
+    }
+
     fn rows_before(&self, index: u32) -> u32 {
         (&self.expanded)
             .into_iter()
@@ -238,6 +251,10 @@ where Item: Copy
 
     fn has_expanded(&self, index: u32) -> bool {
         self.expanded.contains_key(&index)
+    }
+
+    fn total_rows(&self) -> u32 {
+        self.row_count
     }
 
     fn rows_before(&self, index: u32) -> u32 {
@@ -380,14 +397,7 @@ where Item: Copy,
     // called by a GObject wrapper class to implement that interface.
 
     pub fn n_items(&self) -> u32 {
-        let root = self.root.borrow();
-        let child_rows =
-            if root.expanded.is_node() {
-                root.expanded.aug_data().total_rows
-            } else {
-                0
-            };
-        root.item_count + child_rows
+        self.root.borrow().total_rows()
     }
 
     pub fn item(&self, position: u32) -> Option<Object> {
