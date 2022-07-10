@@ -73,7 +73,7 @@ pub struct RootNode<Item> {
     row_count: u32,
 
     /// Interval tree of expanded top level items.
-    expanded: RBTree<Interval, IntervalEnd, Rc<RefCell<TreeNode<Item>>>>,
+    expanded: RBTree<Interval, AugData, Rc<RefCell<TreeNode<Item>>>>,
 }
 
 pub struct TreeNode<Item> {
@@ -109,8 +109,13 @@ pub struct Interval {
     end: IntervalEnd,
 }
 
-impl<Item> Augment<IntervalEnd> for
-    RBTree<Interval, IntervalEnd, Rc<RefCell<TreeNode<Item>>>>
+#[derive(Copy, Clone)]
+pub struct AugData {
+    last_end: IntervalEnd,
+}
+
+impl<Item> Augment<AugData> for
+    RBTree<Interval, AugData, Rc<RefCell<TreeNode<Item>>>>
 {
     fn sync_custom_aug(&mut self) {
         if !self.is_node() {
@@ -120,12 +125,17 @@ impl<Item> Augment<IntervalEnd> for
         let left = self.left_ref();
         let right = self.right_ref();
         let ends = match (left.is_node(), right.is_node()) {
-            (true,  true ) => vec![left.aug_data(), right.aug_data(), own],
-            (true,  false) => vec![left.aug_data(), own],
-            (false, true ) => vec![right.aug_data(), own],
+            (true,  true ) => vec![
+                left.aug_data().last_end, right.aug_data().last_end, own],
+            (true,  false) => vec![left.aug_data().last_end, own],
+            (false, true ) => vec![right.aug_data().last_end, own],
             (false, false) => vec![own]
         };
-        self.set_aug_data(*ends.iter().max().unwrap());
+        self.set_aug_data(
+            AugData {
+                last_end: *ends.iter().max().unwrap(),
+            }
+        );
     }
 }
 
@@ -169,8 +179,11 @@ impl<Item> Node<Item> for RootNode<Item> {
             start: node.item_index,
             end: IntervalEnd::Complete(node.item_index)
         };
+        let aug_data = AugData {
+            last_end: interval.end,
+        };
         if expanded {
-            self.expanded.insert(interval, interval.end, node_ref.clone());
+            self.expanded.insert(interval, aug_data, node_ref.clone());
         } else {
             self.expanded.delete(interval);
         }
