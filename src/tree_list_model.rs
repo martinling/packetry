@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::cmp::max;
 use std::marker::PhantomData;
 use std::num::TryFromIntError;
 use std::rc::{Rc, Weak};
@@ -69,12 +70,6 @@ pub struct RootNode<Item> {
     /// Number of top-level items.
     item_count: u32,
 
-    /// Total number of rows in the model, as currently expanded.
-    ///
-    /// Initially this is equal to the item count, then increases or
-    /// decreases as items are expanded/collapsed.
-    row_count: u32,
-
     /// Interval tree of expanded top level items.
     expanded: RBTree<Interval, AugData, Rc<RefCell<TreeNode<Item>>>>,
 }
@@ -118,6 +113,7 @@ pub struct Interval {
 #[derive(Copy, Clone)]
 pub struct AugData {
     last_end: IntervalEnd,
+    total_rows: u32,
 }
 
 impl<Item> Augment<AugData> for
@@ -127,21 +123,28 @@ impl<Item> Augment<AugData> for
         if !self.is_node() {
             return;
         }
-        let own = self.key().end;
+        let own_rows = unsafe {
+            let root_node = self.data_ref().as_ptr();
+            (*root_node).row_count
+        };
+        let own_end = self.key().end;
         let left = self.left_ref();
         let right = self.right_ref();
-        let ends = match (left.is_node(), right.is_node()) {
-            (true,  true ) => vec![
-                left.aug_data().last_end, right.aug_data().last_end, own],
-            (true,  false) => vec![left.aug_data().last_end, own],
-            (false, true ) => vec![right.aug_data().last_end, own],
-            (false, false) => vec![own]
+        let mut aug_data = AugData {
+            total_rows: own_rows,
+            last_end: own_end
         };
-        self.set_aug_data(
-            AugData {
-                last_end: *ends.iter().max().unwrap(),
-            }
-        );
+        if left.is_node() {
+            let left = left.aug_data();
+            aug_data.total_rows += left.total_rows;
+            aug_data.last_end = max(aug_data.last_end, left.last_end);
+        }
+        if right.is_node() {
+            let right = right.aug_data();
+            aug_data.total_rows += right.total_rows;
+            aug_data.last_end = max(aug_data.last_end, right.last_end);
+        }
+        self.set_aug_data(aug_data);
     }
 }
 
@@ -186,6 +189,7 @@ impl<Item> Node<Item> for RootNode<Item> {
             end: IntervalEnd::Complete(node.item_index)
         };
         let aug_data = AugData {
+            total_rows: node.row_count,
             last_end: interval.end,
         };
         if expanded {
@@ -201,17 +205,17 @@ impl<Item> Node<Item> for RootNode<Item> {
     }
 
     fn propagate_expanded(&mut self,
-                          row_count: u32,
+                          _row_count: u32,
                           item_index: u32,
                           row_index: u32,
-                          expanded: bool)
+                          _expanded: bool)
         -> Result<u32, ModelError>
     {
-        if expanded {
-            self.row_count += row_count;
-        } else {
-            self.row_count -= row_count;
-        }
+        let interval = Interval {
+            start: item_index,
+            end: IntervalEnd::Complete(item_index)
+        };
+        self.expanded.force_sync_aug(interval);
         Ok(self.rows_before(item_index) + row_index)
     }
 }
@@ -341,7 +345,6 @@ where Item: Copy,
             capture: capture.clone(),
             root: Rc::new(RefCell::new(RootNode {
                 item_count,
-                row_count: item_count,
                 expanded: RBTree::new(),
             })),
         })
@@ -377,7 +380,14 @@ where Item: Copy,
     // called by a GObject wrapper class to implement that interface.
 
     pub fn n_items(&self) -> u32 {
-        self.root.borrow().row_count
+        let root = self.root.borrow();
+        let child_rows =
+            if root.expanded.is_node() {
+                root.expanded.aug_data().total_rows
+            } else {
+                0
+            };
+        root.item_count + child_rows
     }
 
     pub fn item(&self, position: u32) -> Option<Object> {
