@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::cmp::max;
 use std::marker::PhantomData;
-use std::mem::drop;
 use std::num::TryFromIntError;
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, Mutex};
@@ -392,18 +391,15 @@ where Item: Copy,
         let mut parent_ref = node.parent.upgrade().ok_or(ParentDropped)?;
         let mut row_index = 0;
         parent_ref.borrow_mut().set_expanded(node_ref, expanded);
-        loop {
+        while let Some((next_ref, next_parent_ref)) = {
             let item_index = current_ref.borrow().item_index;
             let mut parent = parent_ref.borrow_mut();
             parent.propagate_expanded(row_count, item_index, expanded);
             row_index += parent.rows_before(item_index) + 1;
-            if let Some((next_ref, next_parent_ref)) = parent.next_refs()? {
-                drop(parent);
-                current_ref = next_ref;
-                parent_ref = next_parent_ref;
-            } else {
-                break;
-            }
+            parent.next_refs()?
+        } {
+            current_ref = next_ref;
+            parent_ref = next_parent_ref;
         }
 
         if expanded {
