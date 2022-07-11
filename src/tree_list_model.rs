@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::cmp::max;
 use std::marker::PhantomData;
+use std::mem::drop;
 use std::num::TryFromIntError;
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, Mutex};
@@ -30,9 +31,19 @@ pub enum ModelError {
     ParentDropped,
 }
 
+use ModelError::ParentDropped;
+
 pub trait Node<Item> {
     /// Item at this node, if not the root.
     fn item(&self) -> Option<Item>;
+
+    /// The Rc referencing this node, if not the root.
+    fn self_ref(&self)
+        -> Result<Option<Rc<RefCell<TreeNode<Item>>>>, ModelError>;
+
+    /// Parent of this node, if not the root.
+    fn parent_ref(&self)
+        -> Result<Option<Rc<RefCell<dyn Node<Item>>>>, ModelError>;
 
     /// Iterator over this node's expanded children.
     fn expanded(&self)
@@ -41,6 +52,10 @@ pub trait Node<Item> {
     /// Whether this node has an expanded child at this index.
     fn has_expanded(&self, index: u32) -> bool;
 
+    /// Get the expanded child node with this index.
+    fn get_expanded(&self, index: u32)
+        -> Option<&Rc<RefCell<TreeNode<Item>>>>;
+
     /// Total number of rows for this node.
     fn total_rows(&self) -> u32;
 
@@ -48,25 +63,18 @@ pub trait Node<Item> {
     fn rows_before(&self, index: u32) -> u32;
 
     /// Set whether the this child of the node is expanded.
-    ///
-    /// Returns the global position at which this occured.
     fn set_expanded(&mut self,
                     node_ref: &Rc<RefCell<TreeNode<Item>>>,
-                    expanded: bool)
-        -> Result<u32, ModelError>;
+                    expanded: bool);
 
     /// Propagate a node being expanded or collapsed beneath this one.
     ///
-    /// Takes the number of rows added/removed, the index within this
-    /// node's child items, and the index within the child's rows.
-    ///
-    /// Returns the global position of the change.
+    /// Takes the number of rows added/removed, and the index within this
+    /// node's child items.
     fn propagate_expanded(&mut self,
                           row_count: u32,
                           item_index: u32,
-                          row_index: u32,
-                          expanded: bool)
-        -> Result<u32, ModelError>;
+                          expanded: bool);
 }
 
 pub struct RootNode<Item> {
@@ -156,6 +164,18 @@ impl<Item> Node<Item> for RootNode<Item> {
         None
     }
 
+    fn self_ref(&self)
+        -> Result<Option<Rc<RefCell<TreeNode<Item>>>>, ModelError>
+    {
+        Ok(None)
+    }
+
+    fn parent_ref(&self)
+        -> Result<Option<Rc<RefCell<dyn Node<Item>>>>, ModelError>
+    {
+        Ok(None)
+    }
+
     fn expanded(&self)
         -> Box<dyn Iterator<Item=(u32, &Rc<RefCell<TreeNode<Item>>>)> + '_>
     {
@@ -166,11 +186,15 @@ impl<Item> Node<Item> for RootNode<Item> {
     }
 
     fn has_expanded(&self, index: u32) -> bool {
+        self.get_expanded(index).is_some()
+    }
+
+    fn get_expanded(&self, index: u32) -> Option<&Rc<RefCell<TreeNode<Item>>>> {
         let interval = Interval {
             start: index,
             end: IntervalEnd::Complete(index)
         };
-        self.expanded.search(interval).is_some()
+        self.expanded.search(interval)
     }
 
     fn total_rows(&self) -> u32 {
@@ -194,7 +218,6 @@ impl<Item> Node<Item> for RootNode<Item> {
     fn set_expanded(&mut self,
                     node_ref: &Rc<RefCell<TreeNode<Item>>>,
                     expanded: bool)
-        -> Result<u32, ModelError>
     {
         let node = node_ref.borrow();
         let interval = Interval {
@@ -210,26 +233,18 @@ impl<Item> Node<Item> for RootNode<Item> {
         } else {
             self.expanded.delete(interval);
         }
-        self.propagate_expanded(
-            node.row_count,
-            node.item_index,
-            1,
-            expanded)
     }
 
     fn propagate_expanded(&mut self,
                           _row_count: u32,
                           item_index: u32,
-                          row_index: u32,
                           _expanded: bool)
-        -> Result<u32, ModelError>
     {
         let interval = Interval {
             start: item_index,
             end: IntervalEnd::Complete(item_index)
         };
         self.expanded.force_sync_aug(interval);
-        Ok(self.rows_before(item_index) + row_index)
     }
 }
 
@@ -238,6 +253,23 @@ where Item: Copy
 {
     fn item(&self) -> Option<Item> {
         Some(self.item)
+    }
+
+    fn self_ref(&self)
+        -> Result<Option<Rc<RefCell<TreeNode<Item>>>>, ModelError>
+    {
+        Ok(self.parent
+            .upgrade()
+            .ok_or(ParentDropped)?
+            .borrow()
+            .get_expanded(self.item_index)
+            .map(|node_ref| node_ref.clone()))
+    }
+
+    fn parent_ref(&self)
+        -> Result<Option<Rc<RefCell<dyn Node<Item>>>>, ModelError>
+    {
+        Ok(Some(self.parent.upgrade().ok_or(ParentDropped)?.clone()))
     }
 
     fn expanded(&self)
@@ -251,6 +283,10 @@ where Item: Copy
 
     fn has_expanded(&self, index: u32) -> bool {
         self.expanded.contains_key(&index)
+    }
+
+    fn get_expanded(&self, index: u32) -> Option<&Rc<RefCell<TreeNode<Item>>>> {
+        self.expanded.get(&index)
     }
 
     fn total_rows(&self) -> u32 {
@@ -268,7 +304,6 @@ where Item: Copy
     fn set_expanded(&mut self,
                     node_ref: &Rc<RefCell<TreeNode<Item>>>,
                     expanded: bool)
-        -> Result<u32, ModelError>
     {
         let node = node_ref.borrow();
         if expanded {
@@ -276,33 +311,18 @@ where Item: Copy
         } else {
             self.expanded.remove(&node.item_index);
         }
-        self.propagate_expanded(
-            node.row_count,
-            node.item_index,
-            1,
-            expanded)
     }
 
     fn propagate_expanded(&mut self,
                           row_count: u32,
-                          item_index: u32,
-                          row_index: u32,
+                          _item_index: u32,
                           expanded: bool)
-        -> Result<u32, ModelError>
     {
-        let parent_ref =
-            self.parent.upgrade().ok_or(ModelError::ParentDropped)?;
-        let mut parent = parent_ref.borrow_mut();
         if expanded {
             self.row_count += row_count;
         } else {
             self.row_count -= row_count;
         }
-        parent.propagate_expanded(
-            row_count,
-            self.item_index,
-            self.rows_before(item_index) + row_index + 1,
-            expanded)
     }
 }
 
@@ -377,17 +397,32 @@ where Item: Copy,
         if node.expanded() == expanded {
             return Ok(());
         }
-
-        let position = {
-            let rc = node.parent.upgrade().ok_or(ModelError::ParentDropped)?;
-            let mut parent = rc.borrow_mut();
-            parent.set_expanded(node_ref, expanded)?
-        };
+        let row_count = node.row_count;
+        let mut current_ref = node_ref.clone();
+        let mut parent_ref = node.parent.upgrade().ok_or(ParentDropped)?;
+        let mut row_index = 0;
+        parent_ref.borrow_mut().set_expanded(node_ref, expanded);
+        loop {
+            let item_index = current_ref.borrow().item_index;
+            let mut parent = parent_ref.borrow_mut();
+            parent.propagate_expanded(row_count, item_index, expanded);
+            row_index += parent.rows_before(item_index) + 1;
+            if let (Some(next_ref), Some(next_parent_ref)) = (
+                parent.self_ref()?,
+                parent.parent_ref()?)
+            {
+                current_ref = next_ref.clone();
+                drop(parent);
+                parent_ref = next_parent_ref;
+            } else {
+                break;
+            }
+        }
 
         if expanded {
-            model.items_changed(position, 0, node.row_count);
+            model.items_changed(row_index, 0, row_count);
         } else {
-            model.items_changed(position, node.row_count, 0);
+            model.items_changed(row_index, row_count, 0);
         }
 
         Ok(())
