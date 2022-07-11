@@ -134,10 +134,7 @@ impl<Item> Augment<AugData> for
         if !self.is_node() {
             return;
         }
-        let own_rows = unsafe {
-            let root_node = self.data_ref().as_ptr();
-            (*root_node).row_count
-        };
+        let own_rows = self.data_ref().borrow().row_count;
         let own_end = self.key().end;
         let left = self.left_ref();
         let right = self.right_ref();
