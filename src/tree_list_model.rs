@@ -37,14 +37,6 @@ pub trait Node<Item> {
     /// Item at this node, if not the root.
     fn item(&self) -> Option<Item>;
 
-    /// The Rc referencing this node, if not the root.
-    fn self_ref(&self)
-        -> Result<Option<Rc<RefCell<TreeNode<Item>>>>, ModelError>;
-
-    /// Parent of this node, if not the root.
-    fn parent_ref(&self)
-        -> Result<Option<Rc<RefCell<dyn Node<Item>>>>, ModelError>;
-
     /// Iterator over this node's expanded children.
     fn expanded(&self)
         -> Box<dyn Iterator<Item=(u32, &Rc<RefCell<TreeNode<Item>>>)> + '_>;
@@ -75,6 +67,13 @@ pub trait Node<Item> {
                           row_count: u32,
                           item_index: u32,
                           expanded: bool);
+
+    /// If this node is not the root, get the Rcs to it and its parent.
+    fn next_refs(&self)
+        -> Result<Option<(
+            Rc<RefCell<TreeNode<Item>>>,
+            Rc<RefCell<dyn Node<Item>>>)>,
+        ModelError>;
 }
 
 pub struct RootNode<Item> {
@@ -161,18 +160,6 @@ impl<Item> Node<Item> for RootNode<Item> {
         None
     }
 
-    fn self_ref(&self)
-        -> Result<Option<Rc<RefCell<TreeNode<Item>>>>, ModelError>
-    {
-        Ok(None)
-    }
-
-    fn parent_ref(&self)
-        -> Result<Option<Rc<RefCell<dyn Node<Item>>>>, ModelError>
-    {
-        Ok(None)
-    }
-
     fn expanded(&self)
         -> Box<dyn Iterator<Item=(u32, &Rc<RefCell<TreeNode<Item>>>)> + '_>
     {
@@ -243,6 +230,15 @@ impl<Item> Node<Item> for RootNode<Item> {
         };
         self.expanded.force_sync_aug(interval);
     }
+
+    fn next_refs(&self)
+        -> Result<Option<(
+            Rc<RefCell<TreeNode<Item>>>,
+            Rc<RefCell<dyn Node<Item>>>)>,
+        ModelError>
+    {
+        Ok(None)
+    }
 }
 
 impl<Item> Node<Item> for TreeNode<Item>
@@ -250,23 +246,6 @@ where Item: Copy
 {
     fn item(&self) -> Option<Item> {
         Some(self.item)
-    }
-
-    fn self_ref(&self)
-        -> Result<Option<Rc<RefCell<TreeNode<Item>>>>, ModelError>
-    {
-        Ok(self.parent
-            .upgrade()
-            .ok_or(ParentDropped)?
-            .borrow()
-            .get_expanded(self.item_index)
-            .map(|node_ref| node_ref.clone()))
-    }
-
-    fn parent_ref(&self)
-        -> Result<Option<Rc<RefCell<dyn Node<Item>>>>, ModelError>
-    {
-        Ok(Some(self.parent.upgrade().ok_or(ParentDropped)?.clone()))
     }
 
     fn expanded(&self)
@@ -320,6 +299,20 @@ where Item: Copy
         } else {
             self.row_count -= row_count;
         }
+    }
+
+    fn next_refs(&self)
+        -> Result<Option<(
+            Rc<RefCell<TreeNode<Item>>>,
+            Rc<RefCell<dyn Node<Item>>>)>,
+        ModelError>
+    {
+        let parent_ref = self.parent.upgrade().ok_or(ParentDropped)?;
+        let refs = parent_ref
+            .borrow()
+            .get_expanded(self.item_index)
+            .map(|self_ref| (self_ref.clone(), parent_ref.clone()));
+        Ok(refs)
     }
 }
 
@@ -404,12 +397,9 @@ where Item: Copy,
             let mut parent = parent_ref.borrow_mut();
             parent.propagate_expanded(row_count, item_index, expanded);
             row_index += parent.rows_before(item_index) + 1;
-            if let (Some(next_ref), Some(next_parent_ref)) = (
-                parent.self_ref()?,
-                parent.parent_ref()?)
-            {
-                current_ref = next_ref.clone();
+            if let Some((next_ref, next_parent_ref)) = parent.next_refs()? {
                 drop(parent);
+                current_ref = next_ref;
                 parent_ref = next_parent_ref;
             } else {
                 break;
