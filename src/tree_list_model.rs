@@ -441,7 +441,7 @@ where Item: Copy,
             parent: Rc::downgrade(&parent_ref),
             interval: Interval {
                 start: relative_position,
-                end: IntervalEnd::Complete(relative_position + 1),
+                end: cap.item_end(&item, relative_position).ok()?,
             },
             item_count,
             row_count: item_count,
