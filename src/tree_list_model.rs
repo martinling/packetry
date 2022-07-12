@@ -16,6 +16,7 @@ use rtrees::rbtree::{RBTree, Augment};
 use thiserror::Error;
 
 use crate::capture::{Capture, CaptureError, ItemSource};
+use crate::interval::{Interval, IntervalEnd};
 use crate::model::GenericModel;
 use crate::row_data::GenericRowData;
 
@@ -104,19 +105,6 @@ pub struct TreeNode<Item> {
 
     /// Expanded children of this item, by index.
     expanded: BTreeMap<u64, Rc<RefCell<TreeNode<Item>>>>,
-}
-
-// This can't just be Option<u64> because we need Incomplete ordered last.
-#[derive(Copy, Clone, PartialEq, PartialOrd, Eq, Ord)]
-enum IntervalEnd {
-    Complete(u64),
-    Incomplete
-}
-
-#[derive(Copy, Clone, PartialEq, PartialOrd, Eq, Ord)]
-pub struct Interval {
-    start: u64,
-    end: IntervalEnd,
 }
 
 #[derive(Copy, Clone)]

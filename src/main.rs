@@ -6,6 +6,7 @@ mod model;
 mod row_data;
 mod expander;
 mod tree_list_model;
+mod interval;
 
 use std::sync::{Arc, Mutex};
 
