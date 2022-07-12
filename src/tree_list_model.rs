@@ -407,41 +407,44 @@ where Item: Copy,
         }
 
         let mut parent_ref: Rc<RefCell<dyn Node<Item>>> = self.root.clone();
-        let mut relative_position = position as u64;
+        let mut index = position as u64;
         'outer: loop {
-            for (_, node_rc) in parent_ref.clone().borrow().expanded() {
+            for (node_index, node_rc) in parent_ref.clone().borrow().expanded() {
                 let node = node_rc.borrow();
-                // If the position is before this node, break out of the loop to look it up.
-                if relative_position < node.interval.start {
+                // If the position is before this node, break out of the loop to
+                // look it up.
+                if index < node_index {
                     break;
                 // If the position matches this node, return it.
-                } else if relative_position == node.interval.start {
+                } else if index == node_index {
                     return Some(RowData::new(node_rc.clone()).upcast::<Object>());
-                // If the position is within this node's children, traverse down the tree and repeat.
-                } else if relative_position <= node.interval.start + node.row_count {
+                // If the position is within this node's children, traverse down
+                // the tree and repeat.
+                } else if index <= node_index + node.row_count {
                     parent_ref = node_rc.clone();
-                    relative_position -= node.interval.start + 1;
+                    index -= node_index + 1;
                     continue 'outer;
                 // Otherwise, if the position is after this node,
                 // adjust the relative position for the node's children above.
                 } else {
-                    relative_position -= node.row_count;
+                    index -= node.row_count;
                 }
             }
             break;
         }
 
-        // If we've broken out to this point, the node must be directly below `parent` - look it up.
+        // If we've broken out to this point, the node must be directly below
+        // `parent` - look it up.
         let mut cap = self.capture.lock().ok()?;
         let parent = parent_ref.borrow();
-        let item = cap.item(&parent.item(), relative_position).ok()?;
+        let item = cap.item(&parent.item(), index).ok()?;
         let item_count = cap.child_count(&item).ok()?;
         let node = TreeNode {
             item,
             parent: Rc::downgrade(&parent_ref),
             interval: Interval {
-                start: relative_position,
-                end: cap.item_end(&item, relative_position).ok()?,
+                start: index,
+                end: cap.item_end(&item, index).ok()?,
             },
             item_count,
             row_count: item_count,
