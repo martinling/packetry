@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::cmp::max;
 use std::marker::PhantomData;
+use std::mem::drop;
 use std::num::TryFromIntError;
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, Mutex};
@@ -60,11 +61,10 @@ pub trait Node<Item> {
 
     /// Propagate a node being expanded or collapsed beneath this one.
     ///
-    /// Takes the number of rows added/removed, and the index within this
-    /// node's child items.
+    /// Takes the number of rows added/removed, and the node's interval.
     fn propagate_expanded(&mut self,
                           row_count: u32,
-                          item_index: u32,
+                          interval: Interval,
                           expanded: bool);
 
     /// If this node is not the root, get the Rcs to it and its parent.
@@ -80,7 +80,7 @@ pub struct RootNode<Item> {
     item_count: u32,
 
     /// Interval tree of expanded top level items.
-    expanded: RBTree<Interval, AugData, Rc<RefCell<TreeNode<Item>>>>,
+    expanded: RBTree<u32, AugData, Rc<RefCell<TreeNode<Item>>>>,
 }
 
 pub struct TreeNode<Item> {
@@ -90,8 +90,8 @@ pub struct TreeNode<Item> {
     /// The node holding the parent of this item.
     parent: Weak<RefCell<dyn Node<Item>>>,
 
-    /// Index of this item below its parent item.
-    item_index: u32,
+    /// Interval spanned by this item.
+    interval: Interval,
 
     /// Number of child items below this item.
     item_count: u32,
@@ -126,14 +126,16 @@ pub struct AugData {
 }
 
 impl<Item> Augment<AugData> for
-    RBTree<Interval, AugData, Rc<RefCell<TreeNode<Item>>>>
+    RBTree<u32, AugData, Rc<RefCell<TreeNode<Item>>>>
 {
     fn sync_custom_aug(&mut self) {
         if !self.is_node() {
             return;
         }
-        let own_rows = self.data_ref().borrow().row_count;
-        let own_end = self.key().end;
+        let node = self.data_ref().borrow();
+        let own_rows = node.row_count;
+        let own_end = node.interval.end;
+        drop(node);
         let left = self.left_ref();
         let right = self.right_ref();
         let mut aug_data = AugData {
@@ -164,7 +166,7 @@ impl<Item> Node<Item> for RootNode<Item> {
     {
         Box::new((&self.expanded)
             .into_iter()
-            .map(|(interval, _, node)| (interval.start, node))
+            .map(|(index, _, node)| (index, node))
         )
     }
 
@@ -173,11 +175,7 @@ impl<Item> Node<Item> for RootNode<Item> {
     }
 
     fn get_expanded(&self, index: u32) -> Option<&Rc<RefCell<TreeNode<Item>>>> {
-        let interval = Interval {
-            start: index,
-            end: IntervalEnd::Complete(index)
-        };
-        self.expanded.search(interval)
+        self.expanded.search(index)
     }
 
     fn total_rows(&self) -> u32 {
@@ -193,7 +191,7 @@ impl<Item> Node<Item> for RootNode<Item> {
     fn rows_before(&self, index: u32) -> u32 {
         (&self.expanded)
             .into_iter()
-            .take_while(|(interval, _, _)| interval.start < index)
+            .take_while(|(i, _, _)| *i < index)
             .map(|(_, _, node)| node.borrow().row_count)
             .sum::<u32>() + index
     }
@@ -203,31 +201,24 @@ impl<Item> Node<Item> for RootNode<Item> {
                     expanded: bool)
     {
         let node = node_ref.borrow();
-        let interval = Interval {
-            start: node.item_index,
-            end: IntervalEnd::Complete(node.item_index)
-        };
         let aug_data = AugData {
             total_rows: node.row_count,
-            last_end: interval.end,
+            last_end: node.interval.end,
         };
         if expanded {
-            self.expanded.insert(interval, aug_data, node_ref.clone());
+            self.expanded.insert(
+                node.interval.start, aug_data, node_ref.clone());
         } else {
-            self.expanded.delete(interval);
+            self.expanded.delete(node.interval.start);
         }
     }
 
     fn propagate_expanded(&mut self,
                           _row_count: u32,
-                          item_index: u32,
+                          interval: Interval,
                           _expanded: bool)
     {
-        let interval = Interval {
-            start: item_index,
-            end: IntervalEnd::Complete(item_index)
-        };
-        self.expanded.force_sync_aug(interval);
+        self.expanded.force_sync_aug(interval.start);
     }
 
     fn next_refs(&self)
@@ -282,15 +273,15 @@ where Item: Copy
     {
         let node = node_ref.borrow();
         if expanded {
-            self.expanded.insert(node.item_index, node_ref.clone());
+            self.expanded.insert(node.interval.start, node_ref.clone());
         } else {
-            self.expanded.remove(&node.item_index);
+            self.expanded.remove(&node.interval.start);
         }
     }
 
     fn propagate_expanded(&mut self,
                           row_count: u32,
-                          _item_index: u32,
+                          _interval: Interval,
                           expanded: bool)
     {
         if expanded {
@@ -309,7 +300,7 @@ where Item: Copy
         let parent_ref = self.parent.upgrade().ok_or(ParentDropped)?;
         let refs = parent_ref
             .borrow()
-            .get_expanded(self.item_index)
+            .get_expanded(self.interval.start)
             .map(|self_ref| (self_ref.clone(), parent_ref.clone()));
         Ok(refs)
     }
@@ -320,7 +311,7 @@ impl<Item> TreeNode<Item> where Item: Copy {
         match self.parent.upgrade() {
             Some(parent_ref) => {
                 let parent = parent_ref.borrow();
-                parent.has_expanded(self.item_index)
+                parent.has_expanded(self.interval.start)
             },
             // Parent is dropped, so node cannot be expanded.
             None => false
@@ -392,10 +383,10 @@ where Item: Copy,
         let mut row_index = 0;
         parent_ref.borrow_mut().set_expanded(node_ref, expanded);
         while let Some((next_ref, next_parent_ref)) = {
-            let item_index = current_ref.borrow().item_index;
+            let interval = current_ref.borrow().interval;
             let mut parent = parent_ref.borrow_mut();
-            parent.propagate_expanded(row_count, item_index, expanded);
-            row_index += parent.rows_before(item_index) + 1;
+            parent.propagate_expanded(row_count, interval, expanded);
+            row_index += parent.rows_before(interval.start) + 1;
             parent.next_refs()?
         } {
             current_ref = next_ref;
@@ -430,15 +421,15 @@ where Item: Copy,
             for (_, node_rc) in parent_ref.clone().borrow().expanded() {
                 let node = node_rc.borrow();
                 // If the position is before this node, break out of the loop to look it up.
-                if relative_position < node.item_index {
+                if relative_position < node.interval.start {
                     break;
                 // If the position matches this node, return it.
-                } else if relative_position == node.item_index {
+                } else if relative_position == node.interval.start {
                     return Some(RowData::new(node_rc.clone()).upcast::<Object>());
                 // If the position is within this node's children, traverse down the tree and repeat.
-                } else if relative_position <= node.item_index + node.row_count {
+                } else if relative_position <= node.interval.start + node.row_count {
                     parent_ref = node_rc.clone();
-                    relative_position -= node.item_index + 1;
+                    relative_position -= node.interval.start + 1;
                     continue 'outer;
                 // Otherwise, if the position is after this node,
                 // adjust the relative position for the node's children above.
@@ -457,7 +448,10 @@ where Item: Copy,
         let node = TreeNode {
             item,
             parent: Rc::downgrade(&parent_ref),
-            item_index: relative_position,
+            interval: Interval {
+                start: relative_position,
+                end: IntervalEnd::Complete(relative_position + 1),
+            },
             item_count,
             row_count: item_count,
             expanded: Default::default(),
