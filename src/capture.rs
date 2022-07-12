@@ -660,7 +660,6 @@ impl Capture {
 }
 
 pub trait ItemSource<Item> {
-    type ItemId;
     fn item(&mut self, parent: &Option<Item>, index: u64) -> Result<Item, CaptureError>;
     fn child_item(&mut self, parent: &Item, index: u64) -> Result<Item, CaptureError>;
     fn item_count(&mut self, parent: &Option<Item>) -> Result<u64, CaptureError>;
@@ -668,8 +667,8 @@ pub trait ItemSource<Item> {
     fn item_end(&mut self, item: &Item, index: u64)
         -> Result<IntervalEnd, CaptureError>;
     fn find_child(&mut self,
-                  after_item_id: Self::ItemId,
-                  expanded: &dyn Fn(Self::ItemId) -> bool,
+                  expanded: &dyn Fn(u64) -> bool,
+                  region: &Range<u64>,
                   index: u64)
         -> Result<Item, CaptureError>;
     fn summary(&mut self, item: &Item) -> Result<String, CaptureError>;
@@ -683,8 +682,6 @@ struct ActiveTransfer {
 }
 
 impl ItemSource<TrafficItem> for Capture {
-    type ItemId = TrafficItemId;
-
     fn item(&mut self, parent: &Option<TrafficItem>, index: u64)
         -> Result<TrafficItem, CaptureError>
     {
@@ -780,57 +777,82 @@ impl ItemSource<TrafficItem> for Capture {
     }
 
     fn find_child(&mut self,
-                  after_item_id: TrafficItemId,
-                  expanded: &dyn Fn(TrafficItemId) -> bool,
-                  index: u64)
+                  expanded: &dyn Fn(u64) -> bool,
+                  region: &Range<u64>,
+                  mut index: u64)
         -> Result<TrafficItem, CaptureError>
     {
-        // Identify all the active transfers we have to consider, and the
-        // number of transactions each has in this span.
-        let transfer_id = self.item_index.get(after_item_id)?;
-        let endpoint_state = self.endpoint_state(transfer_id)?;
-        let mut active_transfers = Vec::<ActiveTransfer>::new();
-        let mut total_transactions = 0_u64;
-        for (i, &state) in endpoint_state.iter().enumerate() {
-            use EndpointState::*;
-            if matches!(EndpointState::from(state), Starting | Ongoing) {
-                // There is a transfer ongoing on this endpoint in this span.
-                let endpoint_id = EndpointId::from(i as u64);
-                let ep_traf = self.endpoint_traffic(endpoint_id)?;
-                // Find the ID of the first item indexed on this EP.
-                let first_item_id = ep_traf.start_index.get(0)?;
-                // Calculate the offset to look up this item on this endpoint.
-                let item_offset = after_item_id - first_item_id;
-                // Find the item ID at which the current transfer started.
-                let start_item_id = ep_traf.start_index.get(item_offset)?;
-                if !expanded(start_item_id) {
-                    // This transfer is not expanded, ignore it.
-                    continue;
+        let mut active_transfers = Vec::new();
+        let mut total_transactions = 0;
+        // First, find the right span: the space between two contiguous items
+        // in which this transaction is to be found.
+        for span_item_id in region.clone().map(TrafficItemId::from_u64) {
+            // If index is zero, return the transfer item starting this span.
+            let transfer_id = self.item_index.get(span_item_id)?;
+            if index == 0 {
+                return Ok(TrafficItem::Transfer(transfer_id));
+            // Otherwise, advance the index to skip over the transfer item.
+            } else {
+                index -= 1;
+            }
+            // Identify all the active transfers we have to consider, and the
+            // number of transactions each has in this span.
+            let endpoint_state = self.endpoint_state(transfer_id)?;
+            active_transfers = Vec::new();
+            for (i, &state) in endpoint_state.iter().enumerate() {
+                use EndpointState::*;
+                if matches!(EndpointState::from(state), Starting | Ongoing) {
+                    // There is a transfer ongoing on this endpoint in this span.
+                    let endpoint_id = EndpointId::from(i as u64);
+                    let ep_traf = self.endpoint_traffic(endpoint_id)?;
+                    // Find the ID of the first item indexed on this EP.
+                    let first_item_id = ep_traf.start_index.get(0)?;
+                    // Calculate the offset to look up this item on this endpoint.
+                    let item_offset = span_item_id - first_item_id;
+                    // Find the item ID at which the current transfer started.
+                    let start_item_id = ep_traf.start_index.get(item_offset)?;
+                    if !expanded(start_item_id.value) {
+                        // This transfer is not expanded, ignore it.
+                        continue;
+                    }
+                    // Find the transaction counts on this endpoint at the
+                    // beginning and end of this span.
+                    let count_range =
+                        ep_traf.progress_index.target_range(
+                            item_offset, ep_traf.transaction_ids.len())?;
+                    let transaction_count = count_range.len();
+                    if transaction_count == 0 {
+                        // This transfer has no transactions in this span.
+                        continue;
+                    }
+                    active_transfers.push(ActiveTransfer {
+                        endpoint_id,
+                        start_item_id,
+                        count_range,
+                    });
+                    total_transactions += transaction_count;
                 }
-                // Find the transaction counts on this endpoint at the
-                // beginning and end of this span.
-                let count_range =
-                    ep_traf.progress_index.target_range(
-                        item_offset, ep_traf.transaction_ids.len())?;
-                let transaction_count = count_range.len();
-                if transaction_count == 0 {
-                    // This transfer has no transactions in this span.
-                    continue;
-                }
-                active_transfers.push(ActiveTransfer {
-                    endpoint_id,
-                    start_item_id,
-                    count_range,
-                });
-                total_transactions += transaction_count;
+            }
+            // If the index is within this span, proceed to the next stage.
+            if index <= total_transactions {
+                break;
+            }
+            // Otherwise, continue to the next span.
+            if index >= total_transactions {
+                index -= total_transactions;
+                total_transactions = 0;
             }
         }
 
+        // Check the index is within the span found by the loop above. This
+        // will fail if the index was past the end of this region's rows.
         if index >= total_transactions {
-            // There can be no transaction with the given index in this span.
             return Err(IndexError);
         }
 
+        // Now we have identified the correct span, and need to find the
+        // transaction with the remaining index.
+        //
         // Initial simple implementation. Get the next transactions for each
         // active transfer, choose the earliest, increment the estimate for
         // that transfer and repeat. This will take O(n) time to find the
@@ -871,8 +893,9 @@ impl ItemSource<TrafficItem> for Capture {
             // If we have now reached the requested index, return the
             // transaction item with the ID we found.
             if transactions_skipped == index {
-                let span = &active_transfers[first];
-                let transfer_id = self.item_index.get(span.start_item_id)?;
+                let transfer = &active_transfers[first];
+                let item_id = transfer.start_item_id;
+                let transfer_id = self.item_index.get(item_id)?;
                 let transaction_id = transaction_ids[first];
                 return Ok(
                     TrafficItem::Transaction(transfer_id, transaction_id));
@@ -1099,8 +1122,6 @@ impl ItemSource<TrafficItem> for Capture {
 }
 
 impl ItemSource<DeviceItem> for Capture {
-    type ItemId = DeviceId;
-
     fn item(&mut self, parent: &Option<DeviceItem>, index: u64)
         -> Result<DeviceItem, CaptureError>
     {
@@ -1197,8 +1218,8 @@ impl ItemSource<DeviceItem> for Capture {
     }
 
     fn find_child(&mut self,
-                  _after_item_id: DeviceId,
-                  _expanded: &dyn Fn(DeviceId) -> bool,
+                  _expanded: &dyn Fn(u64) -> bool,
+                  _region: &Range<u64>,
                   _index: u64)
         -> Result<DeviceItem, CaptureError>
     {
