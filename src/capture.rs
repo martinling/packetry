@@ -2,6 +2,7 @@ use std::ops::Range;
 use std::num::TryFromIntError;
 
 use crate::id::{Id, HasLength};
+use crate::interval::IntervalEnd;
 use crate::file_vec::{FileVec, FileVecError};
 use crate::hybrid_index::{HybridIndex, HybridIndexError, Number};
 use crate::vec_map::VecMap;
@@ -664,8 +665,8 @@ pub trait ItemSource<Item> {
     fn child_item(&mut self, parent: &Item, index: u64) -> Result<Item, CaptureError>;
     fn item_count(&mut self, parent: &Option<Item>) -> Result<u64, CaptureError>;
     fn child_count(&mut self, parent: &Item) -> Result<u64, CaptureError>;
-    fn item_end(&mut self, item_id: Self::ItemId)
-        -> Result<Option<Self::ItemId>, CaptureError>;
+    fn item_end(&mut self, item: &Item, index: u64)
+        -> Result<IntervalEnd, CaptureError>;
     fn find_child(&mut self,
                   after_item_id: Self::ItemId,
                   expanded: &dyn Fn(Self::ItemId) -> bool,
@@ -748,21 +749,34 @@ impl ItemSource<TrafficItem> for Capture {
         })
     }
 
-    fn item_end(&mut self, item_id: TrafficItemId)
-        -> Result<Option<TrafficItemId>, CaptureError>
+    fn item_end(&mut self, item: &TrafficItem, index: u64)
+        -> Result<IntervalEnd, CaptureError>
     {
-        let transfer_id = self.item_index.get(item_id)?;
-        let entry = self.transfer_index.get(transfer_id)?;
-        let ep_transfer_id = entry.transfer_id();
-        if !entry.is_start() {
-            return Err(IndexError)
-        }
-        let ep_traf = self.endpoint_traffic(entry.endpoint_id())?;
-        if ep_transfer_id.value >= ep_traf.end_index.len() {
-            return Ok(None)
-        }
-        let end_item_id = ep_traf.end_index.get(ep_transfer_id)?;
-        Ok(Some(end_item_id))
+        use TrafficItem::*;
+        Ok(match item {
+            Transfer(transfer_id) => {
+                let entry = self.transfer_index.get(*transfer_id)?;
+                let ep_transfer_id = entry.transfer_id();
+                if !entry.is_start() {
+                    return Err(IndexError)
+                }
+                let ep_traf = self.endpoint_traffic(entry.endpoint_id())?;
+                if ep_transfer_id.value >= ep_traf.end_index.len() {
+                    IntervalEnd::Incomplete
+                } else {
+                    let end_item_id = ep_traf.end_index.get(ep_transfer_id)?;
+                    IntervalEnd::Complete(end_item_id.value)
+                }
+            },
+            Transaction(_, transaction_id) => {
+                if transaction_id.value >= self.transaction_index.len() {
+                    IntervalEnd::Incomplete
+                } else {
+                    IntervalEnd::Complete(index + 1)
+                }
+            },
+            Packet(..) => IntervalEnd::Complete(index + 1)
+        })
     }
 
     fn find_child(&mut self,
@@ -1175,10 +1189,11 @@ impl ItemSource<DeviceItem> for Capture {
         }) as u64)
     }
 
-    fn item_end(&mut self, _item_id: DeviceId)
-        -> Result<Option<DeviceId>, CaptureError>
+
+    fn item_end(&mut self, _item: &DeviceItem, _index: u64)
+        -> Result<IntervalEnd, CaptureError>
     {
-        Ok(None)
+        Ok(IntervalEnd::Incomplete)
     }
 
     fn find_child(&mut self,
