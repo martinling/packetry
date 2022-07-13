@@ -94,9 +94,6 @@ pub struct TreeNode<Item> {
     /// Interval spanned by this item.
     interval: Interval,
 
-    /// Number of child items below this item.
-    item_count: u64,
-
     /// Total number of rows associated with this item.
     ///
     /// Initially this is set to the child count of this item,
@@ -438,7 +435,6 @@ where Item: Copy,
         let mut cap = self.capture.lock().ok()?;
         let parent = parent_ref.borrow();
         let item = cap.item(&parent.item(), index).ok()?;
-        let item_count = cap.child_count(&item).ok()?;
         let node = TreeNode {
             item,
             parent: Rc::downgrade(&parent_ref),
@@ -446,8 +442,7 @@ where Item: Copy,
                 start: index,
                 end: cap.item_end(&item, index).ok()?,
             },
-            item_count,
-            row_count: item_count,
+            row_count: cap.child_count(&item).ok()?,
             expanded: Default::default(),
         };
         let rowdata = RowData::new(Rc::new(RefCell::new(node)));
