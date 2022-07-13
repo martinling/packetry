@@ -5,6 +5,7 @@ mod imp;
 use std::sync::{Arc, Mutex};
 
 use gtk::subclass::prelude::*;
+use gtk::prelude::ListModelExt;
 use gtk::{gio, glib};
 
 use crate::capture::{Capture, TrafficItem, DeviceItem};
@@ -20,7 +21,7 @@ glib::wrapper! {
 
 pub trait GenericModel<Item> where Self: Sized {
     fn new(capture: Arc<Mutex<Capture>>) -> Result<Self, ModelError>;
-    fn set_expanded(&self, node: &ItemRc<Item>, expanded: bool)
+    fn set_expanded(&self, node: &ItemRc<Item>, position: u32, expanded: bool)
         -> Result<(), ModelError>;
 }
 
@@ -33,12 +34,22 @@ impl GenericModel<TrafficItem> for TrafficModel {
         Ok(model)
     }
 
-    fn set_expanded(&self, node: &ItemRc<TrafficItem>, expanded: bool)
+    fn set_expanded(&self,
+                    node: &ItemRc<TrafficItem>,
+                    position: u32,
+                    expanded: bool)
         -> Result<(), ModelError>
     {
-        let tree_opt  = self.imp().tree.borrow();
-        let tree = tree_opt.as_ref().unwrap();
-        tree.set_expanded(self, node, expanded)
+        let update = self.imp().tree
+            .borrow_mut()
+            .as_mut()
+            .unwrap()
+            .set_expanded(node, position as u64, expanded)?;
+
+        self.items_changed(
+            update.position, update.rows_removed, update.rows_added);
+
+        Ok(())
     }
 }
 
@@ -51,11 +62,21 @@ impl GenericModel<DeviceItem> for DeviceModel {
         Ok(model)
     }
 
-    fn set_expanded(&self, node: &ItemRc<DeviceItem>, expanded: bool)
+    fn set_expanded(&self,
+                    node: &ItemRc<DeviceItem>,
+                    position: u32,
+                    expanded: bool)
         -> Result<(), ModelError>
     {
-        let tree_opt  = self.imp().tree.borrow();
-        let tree = tree_opt.as_ref().unwrap();
-        tree.set_expanded(self, node, expanded)
+        let update = self.imp().tree
+            .borrow_mut()
+            .as_mut()
+            .unwrap()
+            .set_expanded(node, position as u64, expanded)?;
+
+        self.items_changed(
+            update.position, update.rows_removed, update.rows_added);
+
+        Ok(())
     }
 }

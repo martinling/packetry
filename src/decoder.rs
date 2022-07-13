@@ -335,7 +335,7 @@ impl<'cap> Decoder<'cap> {
             transfer_index: HybridIndex::new(1)?,
             data_index: HybridIndex::new(1)?,
             total_data: 0,
-            start_index: HybridIndex::new(1)?,
+            first_item_id: None,
             progress_index: HybridIndex::new(1)?,
             end_index: HybridIndex::new(1)?,
         });
@@ -742,23 +742,27 @@ impl<'cap> Decoder<'cap> {
             let endpoint_id = EndpointId::from_u64(i);
             let ep_data =
                 self.endpoint_data.get_mut(endpoint_id).ok_or(IndexError)?;
-            if start && endpoint_id == item_endpoint_id {
-                ep_data.start_item = Some(item_id);
-            }
-            if let Some(start_item_id) = ep_data.start_item {
-                // Record which item the current transfer started at.
+            if start && endpoint_id == item_endpoint_id &&
+                ep_data.start_item.replace(item_id).is_none()
+            {
                 let ep_traf = self.capture.endpoint_traffic(endpoint_id)?;
-                ep_traf.start_index.push(start_item_id)?;
+                ep_traf.first_item_id = Some(item_id);
             }
             if let Some(ep_transfer_id) = ep_data.ended.take() {
                 // This transfer has ended and is not yet linked to an item.
                 let ep_traf = self.capture.endpoint_traffic(endpoint_id)?;
                 assert!(ep_traf.end_index.push(item_id)? == ep_transfer_id);
             }
-            // Record the total transactions on this endpoint.
             let ep_traf = self.capture.endpoint_traffic(endpoint_id)?;
-            let transaction_count = ep_traf.transaction_ids.len();
-            ep_traf.progress_index.push(transaction_count)?;
+            if ep_traf.first_item_id.is_some() {
+                // Record the total transactions on this endpoint.
+                let mut transaction_count = ep_traf.transaction_ids.len();
+                if start && endpoint_id == item_endpoint_id {
+                    // We just added a transaction, that shouldn't be included.
+                    transaction_count -= 1;
+                }
+                ep_traf.progress_index.push(transaction_count)?;
+            }
         }
 
         Ok(item_id)

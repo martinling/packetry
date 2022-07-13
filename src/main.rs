@@ -54,7 +54,7 @@ fn create_view<Item: 'static, Model, RowData>(capture: &Arc<Mutex<Capture>>)
         list_item.set_child(Some(&expander));
     });
     factory.connect_bind(move |_, list_item| {
-        let row = list_item
+        let row_data = list_item
             .item()
             .expect("The item has to exist.")
             .downcast::<RowData>()
@@ -66,7 +66,7 @@ fn create_view<Item: 'static, Model, RowData>(capture: &Arc<Mutex<Capture>>)
             .downcast::<ExpanderWrapper>()
             .expect("The child must be a ExpanderWrapper.");
 
-        let node_ref = row.node();
+        let node_ref = row_data.node();
         let node = node_ref.borrow();
         let summary = node.field(&cap_arc, Box::new(Capture::summary));
         expander_wrapper.set_text(summary);
@@ -77,9 +77,13 @@ fn create_view<Item: 'static, Model, RowData>(capture: &Arc<Mutex<Capture>>)
         expander.set_expanded(node.expanded());
         let model = model.clone();
         let node_ref = node_ref.clone();
+        let list_item = list_item.clone();
         let handler = expander.connect_expanded_notify(move |expander| {
-            model.set_expanded(&node_ref, expander.is_expanded())
-                 .expect("Failed to expand node")
+            model.set_expanded(
+                    &node_ref,
+                    list_item.position(),
+                    expander.is_expanded())
+                .expect("Failed to expand node")
         });
         expander_wrapper.set_handler(handler);
     });
