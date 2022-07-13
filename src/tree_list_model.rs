@@ -34,20 +34,22 @@ pub enum ModelError {
 
 use ModelError::ParentDropped;
 
+pub type ItemRc<Item> = Rc<RefCell<ItemNode<Item>>>;
+pub type NodeRc<Item> = Rc<RefCell<dyn Node<Item>>>;
+pub type ItemParentRcs<Item> = (ItemRc<Item>, NodeRc<Item>);
+
 pub trait Node<Item> {
     /// Item at this node, if not the root.
     fn item(&self) -> Option<Item>;
 
     /// Iterator over this node's expanded children.
-    fn expanded(&self)
-        -> Box<dyn Iterator<Item=(u64, &Rc<RefCell<TreeNode<Item>>>)> + '_>;
+    fn expanded(&self) -> Box<dyn Iterator<Item=(u64, &ItemRc<Item>)> + '_>;
 
     /// Whether this node has an expanded child at this index.
     fn has_expanded(&self, index: u64) -> bool;
 
     /// Get the expanded child node with this index.
-    fn get_expanded(&self, index: u64)
-        -> Option<&Rc<RefCell<TreeNode<Item>>>>;
+    fn get_expanded(&self, index: u64) -> Option<&ItemRc<Item>>;
 
     /// Total number of rows for this node.
     fn total_rows(&self) -> u64;
@@ -56,9 +58,7 @@ pub trait Node<Item> {
     fn rows_before(&self, index: u64) -> u64;
 
     /// Set whether the this child of the node is expanded.
-    fn set_expanded(&mut self,
-                    node_ref: &Rc<RefCell<TreeNode<Item>>>,
-                    expanded: bool);
+    fn set_expanded(&mut self, node_ref: &ItemRc<Item>, expanded: bool);
 
     /// Propagate a node being expanded or collapsed beneath this one.
     ///
@@ -69,11 +69,7 @@ pub trait Node<Item> {
                           expanded: bool);
 
     /// If this node is not the root, get the Rcs to it and its parent.
-    fn next_refs(&self)
-        -> Result<Option<(
-            Rc<RefCell<TreeNode<Item>>>,
-            Rc<RefCell<dyn Node<Item>>>)>,
-        ModelError>;
+    fn next_refs(&self) -> Result<Option<ItemParentRcs<Item>>, ModelError>;
 }
 
 pub struct RootNode<Item> {
@@ -81,10 +77,10 @@ pub struct RootNode<Item> {
     item_count: u64,
 
     /// Interval tree of expanded top level items.
-    expanded: RBTree<u64, AugData, Rc<RefCell<TreeNode<Item>>>>,
+    expanded: RBTree<u64, AugData, ItemRc<Item>>,
 }
 
-pub struct TreeNode<Item> {
+pub struct ItemNode<Item> {
     /// The item at this node.
     item: Item,
 
@@ -101,7 +97,7 @@ pub struct TreeNode<Item> {
     row_count: u64,
 
     /// Expanded children of this item, by index.
-    expanded: BTreeMap<u64, Rc<RefCell<TreeNode<Item>>>>,
+    expanded: BTreeMap<u64, ItemRc<Item>>,
 }
 
 #[derive(Copy, Clone)]
@@ -111,7 +107,7 @@ pub struct AugData {
 }
 
 impl<Item> Augment<AugData> for
-    RBTree<u64, AugData, Rc<RefCell<TreeNode<Item>>>>
+    RBTree<u64, AugData, ItemRc<Item>>
 {
     fn sync_custom_aug(&mut self) {
         if !self.is_node() {
@@ -146,9 +142,7 @@ impl<Item> Node<Item> for RootNode<Item> {
         None
     }
 
-    fn expanded(&self)
-        -> Box<dyn Iterator<Item=(u64, &Rc<RefCell<TreeNode<Item>>>)> + '_>
-    {
+    fn expanded(&self) -> Box<dyn Iterator<Item=(u64, &ItemRc<Item>)> + '_> {
         Box::new((&self.expanded)
             .into_iter()
             .map(|(index, _, node)| (index, node))
@@ -159,7 +153,7 @@ impl<Item> Node<Item> for RootNode<Item> {
         self.get_expanded(index).is_some()
     }
 
-    fn get_expanded(&self, index: u64) -> Option<&Rc<RefCell<TreeNode<Item>>>> {
+    fn get_expanded(&self, index: u64) -> Option<&ItemRc<Item>> {
         self.expanded.search(index)
     }
 
@@ -182,7 +176,7 @@ impl<Item> Node<Item> for RootNode<Item> {
     }
 
     fn set_expanded(&mut self,
-                    node_ref: &Rc<RefCell<TreeNode<Item>>>,
+                    node_ref: &ItemRc<Item>,
                     expanded: bool)
     {
         let node = node_ref.borrow();
@@ -206,26 +200,19 @@ impl<Item> Node<Item> for RootNode<Item> {
         self.expanded.force_sync_aug(interval.start);
     }
 
-    fn next_refs(&self)
-        -> Result<Option<(
-            Rc<RefCell<TreeNode<Item>>>,
-            Rc<RefCell<dyn Node<Item>>>)>,
-        ModelError>
-    {
+    fn next_refs(&self) -> Result<Option<ItemParentRcs<Item>>, ModelError> {
         Ok(None)
     }
 }
 
-impl<Item> Node<Item> for TreeNode<Item>
+impl<Item> Node<Item> for ItemNode<Item>
 where Item: Copy
 {
     fn item(&self) -> Option<Item> {
         Some(self.item)
     }
 
-    fn expanded(&self)
-        -> Box<dyn Iterator<Item=(u64, &Rc<RefCell<TreeNode<Item>>>)> + '_>
-    {
+    fn expanded(&self) -> Box<dyn Iterator<Item=(u64, &ItemRc<Item>)> + '_> {
         Box::new(self.expanded
             .iter()
             .map(|(&index, node)| (index, node))
@@ -236,7 +223,7 @@ where Item: Copy
         self.expanded.contains_key(&index)
     }
 
-    fn get_expanded(&self, index: u64) -> Option<&Rc<RefCell<TreeNode<Item>>>> {
+    fn get_expanded(&self, index: u64) -> Option<&ItemRc<Item>> {
         self.expanded.get(&index)
     }
 
@@ -252,10 +239,7 @@ where Item: Copy
             .sum::<u64>() + index
     }
 
-    fn set_expanded(&mut self,
-                    node_ref: &Rc<RefCell<TreeNode<Item>>>,
-                    expanded: bool)
-    {
+    fn set_expanded(&mut self, node_ref: &ItemRc<Item>, expanded: bool) {
         let node = node_ref.borrow();
         if expanded {
             self.expanded.insert(node.interval.start, node_ref.clone());
@@ -276,12 +260,7 @@ where Item: Copy
         }
     }
 
-    fn next_refs(&self)
-        -> Result<Option<(
-            Rc<RefCell<TreeNode<Item>>>,
-            Rc<RefCell<dyn Node<Item>>>)>,
-        ModelError>
-    {
+    fn next_refs(&self) -> Result<Option<ItemParentRcs<Item>>, ModelError> {
         let parent_ref = self.parent.upgrade().ok_or(ParentDropped)?;
         let refs = parent_ref
             .borrow()
@@ -291,7 +270,7 @@ where Item: Copy
     }
 }
 
-impl<Item> TreeNode<Item> where Item: Copy {
+impl<Item> ItemNode<Item> where Item: Copy {
     pub fn expanded(&self) -> bool {
         match self.parent.upgrade() {
             Some(parent_ref) => {
@@ -354,7 +333,7 @@ where Item: Copy,
 
     pub fn set_expanded(&self,
                         model: &Model,
-                        node_ref: &Rc<RefCell<TreeNode<Item>>>,
+                        node_ref: &ItemRc<Item>,
                         expanded: bool)
         -> Result<(), ModelError>
     {
@@ -403,7 +382,7 @@ where Item: Copy,
             return None
         }
 
-        let mut parent_ref: Rc<RefCell<dyn Node<Item>>> = self.root.clone();
+        let mut parent_ref: NodeRc<Item> = self.root.clone();
         let mut index = position as u64;
         'outer: loop {
             for (node_index, node_rc) in parent_ref.clone().borrow().expanded() {
@@ -435,7 +414,7 @@ where Item: Copy,
         let mut cap = self.capture.lock().ok()?;
         let parent = parent_ref.borrow();
         let item = cap.item(&parent.item(), index).ok()?;
-        let node = TreeNode {
+        let node = ItemNode {
             item,
             parent: Rc::downgrade(&parent_ref),
             interval: Interval {

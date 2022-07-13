@@ -6,14 +6,11 @@
 
 mod imp;
 
-use std::rc::Rc;
-use std::cell::RefCell;
-
 use gtk::glib;
 use gtk::subclass::prelude::*;
 
 use crate::capture::{TrafficItem, DeviceItem};
-use crate::tree_list_model::TreeNode;
+use crate::tree_list_model::ItemRc;
 
 // Public part of the RowData type. This behaves like a normal gtk-rs-style GObject
 // binding
@@ -25,32 +22,32 @@ glib::wrapper! {
 }
 
 pub trait GenericRowData<Item> where Item: Copy {
-    fn new(node: Rc<RefCell<TreeNode<Item>>>) -> Self;
-    fn node(&self) -> Rc<RefCell<TreeNode<Item>>>;
+    fn new(node: ItemRc<Item>) -> Self;
+    fn node(&self) -> ItemRc<Item>;
 }
 
 impl GenericRowData<TrafficItem> for TrafficRowData {
-    fn new(node: Rc<RefCell<TreeNode<TrafficItem>>>) -> TrafficRowData {
+    fn new(node: ItemRc<TrafficItem>) -> TrafficRowData {
         let row: TrafficRowData =
             glib::Object::new(&[]).expect("Failed to create row data");
         row.imp().node.replace(Some(node));
         row
     }
 
-    fn node(&self) -> Rc<RefCell<TreeNode<TrafficItem>>> {
+    fn node(&self) -> ItemRc<TrafficItem> {
         self.imp().node.borrow().as_ref().unwrap().clone()
     }
 }
 
 impl GenericRowData<DeviceItem> for DeviceRowData {
-    fn new(node: Rc<RefCell<TreeNode<DeviceItem>>>) -> DeviceRowData {
+    fn new(node: ItemRc<DeviceItem>) -> DeviceRowData {
         let row: DeviceRowData =
             glib::Object::new(&[]).expect("Failed to create row data");
         row.imp().node.replace(Some(node));
         row
     }
 
-    fn node(&self) -> Rc<RefCell<TreeNode<DeviceItem>>> {
+    fn node(&self) -> ItemRc<DeviceItem> {
         self.imp().node.borrow().as_ref().unwrap().clone()
     }
 }

@@ -2,15 +2,13 @@
 
 mod imp;
 
-use std::rc::Rc;
-use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 
 use gtk::subclass::prelude::*;
 use gtk::{gio, glib};
 
 use crate::capture::{Capture, TrafficItem, DeviceItem};
-use crate::tree_list_model::{TreeListModel, TreeNode, ModelError};
+use crate::tree_list_model::{TreeListModel, ItemRc, ModelError};
 
 // Public part of the Model type.
 glib::wrapper! {
@@ -22,9 +20,7 @@ glib::wrapper! {
 
 pub trait GenericModel<Item> where Self: Sized {
     fn new(capture: Arc<Mutex<Capture>>) -> Result<Self, ModelError>;
-    fn set_expanded(&self,
-                    node: &Rc<RefCell<TreeNode<Item>>>,
-                    expanded: bool)
+    fn set_expanded(&self, node: &ItemRc<Item>, expanded: bool)
         -> Result<(), ModelError>;
 }
 
@@ -37,9 +33,7 @@ impl GenericModel<TrafficItem> for TrafficModel {
         Ok(model)
     }
 
-    fn set_expanded(&self,
-                    node: &Rc<RefCell<TreeNode<TrafficItem>>>,
-                    expanded: bool)
+    fn set_expanded(&self, node: &ItemRc<TrafficItem>, expanded: bool)
         -> Result<(), ModelError>
     {
         let tree_opt  = self.imp().tree.borrow();
@@ -57,9 +51,7 @@ impl GenericModel<DeviceItem> for DeviceModel {
         Ok(model)
     }
 
-    fn set_expanded(&self,
-                    node: &Rc<RefCell<TreeNode<DeviceItem>>>,
-                    expanded: bool)
+    fn set_expanded(&self, node: &ItemRc<DeviceItem>, expanded: bool)
         -> Result<(), ModelError>
     {
         let tree_opt  = self.imp().tree.borrow();
