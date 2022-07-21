@@ -9,7 +9,12 @@ use CaptureError::IndexError;
 
 impl PID {
     fn from_packet(packet: &[u8]) -> Result<PID, CaptureError> {
-        Ok(PID::from(*packet.get(0).ok_or(IndexError)?))
+        let first_byte = packet
+            .get(0)
+            .ok_or_else(||
+                IndexError(String::from(
+                    "Packet is empty, cannot retrieve PID")))?;
+        Ok(PID::from(*first_byte))
     }
 }
 
@@ -192,7 +197,8 @@ impl<'cap> Decoder<'cap> {
             (0, _)        => Direction::Out,
             (_, PID::IN)  => Direction::In,
             (_, PID::OUT) => Direction::Out,
-            _ => return Err(IndexError)
+            _ => return Err(IndexError(format!(
+                "PID {} does not indicate a direction", pid)))
         };
         let key = EndpointKey {
             dev_addr,
@@ -278,7 +284,9 @@ impl<'cap> Decoder<'cap> {
     {
         if self.transaction_state.count == 0 { return Ok(()) }
         let start_packet_id =
-            self.transaction_state.start.ok_or(IndexError)?;
+            self.transaction_state.start.ok_or_else(||
+                IndexError(String::from(
+                    "Transaction state has no start PID")))?;
         let transaction_id =
             self.capture.transaction_index.push(start_packet_id)?;
         self.transfer_update(transaction_id)?;
@@ -345,19 +353,27 @@ impl<'cap> Decoder<'cap> {
     }
 
     fn current_endpoint_id(&self) -> Result<EndpointId, CaptureError> {
-        self.transaction_state.endpoint_id.ok_or(IndexError)
+        self.transaction_state.endpoint_id.ok_or_else(||
+            IndexError(String::from(
+                "Transaction state has no endpoint ID set")))
     }
 
     fn current_endpoint_data(&self) -> Result<&EndpointData, CaptureError> {
         let endpoint_id = self.current_endpoint_id()?;
-        self.endpoint_data.get(endpoint_id).ok_or(IndexError)
+        self.endpoint_data.get(endpoint_id).ok_or_else(||
+            IndexError(format!(
+                "Decoder has no data for current endpoint ID {}",
+                endpoint_id)))
     }
 
     fn current_endpoint_data_mut(&mut self)
         -> Result<&mut EndpointData, CaptureError>
     {
         let endpoint_id = self.current_endpoint_id()?;
-        self.endpoint_data.get_mut(endpoint_id).ok_or(IndexError)
+        self.endpoint_data.get_mut(endpoint_id).ok_or_else(||
+            IndexError(format!(
+                "Decoder has no data for current endpoint ID {}",
+                endpoint_id)))
     }
 
     fn current_device_data(&self)
@@ -444,7 +460,9 @@ impl<'cap> Decoder<'cap> {
     }
 
     fn transfer_status(&mut self) -> Result<DecodeStatus, CaptureError> {
-        let next = self.transaction_state.first.ok_or(IndexError)?;
+        let next = self.transaction_state.first.ok_or_else(||
+            IndexError(String::from(
+                "Transaction state has no first PID set")))?;
         let endpoint_id = self.current_endpoint_id()?;
         let ep_data = self.current_endpoint_data()?;
         let dev_data = self.current_device_data()?;
@@ -694,7 +712,9 @@ impl<'cap> Decoder<'cap> {
         -> Result<TransferId, CaptureError>
     {
         let ep_data = self.current_endpoint_data()?;
-        let ep_transfer_id = ep_data.active.ok_or(IndexError)?;
+        let ep_transfer_id = ep_data.active.ok_or_else(||
+            IndexError(format!(
+                "No active transfer on endpoint {}", endpoint_id)))?;
         self.add_endpoint_state(endpoint_id, start)?;
         let mut entry = TransferIndexEntry::default();
         entry.set_endpoint_id(endpoint_id);
@@ -740,8 +760,11 @@ impl<'cap> Decoder<'cap> {
         let endpoint_count = self.capture.endpoints.len();
         for i in 0..endpoint_count {
             let endpoint_id = EndpointId::from_u64(i);
-            let ep_data =
-                self.endpoint_data.get_mut(endpoint_id).ok_or(IndexError)?;
+            let ep_data = self.endpoint_data
+                .get_mut(endpoint_id)
+                .ok_or_else(||
+                    IndexError(format!(
+                        "Decoder has no data for endpoint {}", endpoint_id)))?;
             if start && endpoint_id == item_endpoint_id &&
                 ep_data.start_item.replace(item_id).is_none()
             {

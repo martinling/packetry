@@ -24,8 +24,8 @@ pub enum CaptureError {
     RangeError(#[from] TryFromIntError),
     #[error("Descriptor missing")]
     DescriptorMissing,
-    #[error("Invalid index")]
-    IndexError,
+    #[error("Indexing error: {0}")]
+    IndexError(String),
 }
 
 use CaptureError::{DescriptorMissing, IndexError};
@@ -217,7 +217,8 @@ impl Configuration {
     {
         match self.interfaces.get(*number) {
             Some(iface) => Ok(iface),
-            _ => Err(IndexError)
+            _ => Err(IndexError(format!(
+                "Configuration has no interface {}", number)))
         }
     }
 }
@@ -228,7 +229,8 @@ impl Interface {
     {
         match self.endpoint_descriptors.get(*number) {
             Some(desc) => Ok(desc),
-            _ => Err(IndexError)
+            _ => Err(IndexError(format!(
+                "Interface has no endpoint descriptor {}", number)))
         }
     }
 }
@@ -454,7 +456,8 @@ impl Capture {
     pub fn endpoint_traffic(&mut self, endpoint_id: EndpointId)
         -> Result<&mut EndpointTraffic, CaptureError>
     {
-        self.endpoint_traffic.get_mut(endpoint_id).ok_or(IndexError)
+        self.endpoint_traffic.get_mut(endpoint_id).ok_or_else(||
+            IndexError(format!("Capture has no endpoint ID {}", endpoint_id)))
     }
 
     fn transfer_range(&mut self, entry: &TransferIndexEntry)
@@ -598,7 +601,8 @@ impl Capture {
                 SetupFields::from_data_packet(&data_packet)
             },
             _ => {
-                return Err(IndexError);
+                return Err(IndexError(String::from(
+                    "Control transfer did not start with SETUP packet")))
             }
         };
         let direction = fields.type_fields.direction();
@@ -626,13 +630,15 @@ impl Capture {
     pub fn device_data(&self, id: &DeviceId)
         -> Result<&DeviceData, CaptureError>
     {
-        self.device_data.get(*id).ok_or(IndexError)
+        self.device_data.get(*id).ok_or_else(||
+            IndexError(format!("Capture has no device with ID {}", id)))
     }
 
     pub fn device_data_mut(&mut self, id: &DeviceId)
         -> Result<&mut DeviceData, CaptureError>
     {
-        self.device_data.get_mut(*id).ok_or(IndexError)
+        self.device_data.get_mut(*id).ok_or_else(||
+            IndexError(format!("Capture has no device with ID {}", id)))
     }
 
     pub fn try_configuration(&self, dev: &DeviceId, conf: &ConfigNum)
@@ -723,7 +729,8 @@ impl ItemSource<TrafficItem> for Capture {
             Transaction(transfer_id, transaction_id) =>
                 Packet(*transfer_id, *transaction_id, {
                     self.transaction_index.get(*transaction_id)? + index}),
-            Packet(..) => return Err(IndexError)
+            Packet(..) => return Err(IndexError(String::from(
+                "Packets have no child items")))
         })
     }
 
@@ -861,7 +868,9 @@ impl ItemSource<TrafficItem> for Capture {
         // Check the index is within the span found by the loop above. This
         // will fail if the index was past the end of this region's rows.
         if index >= total_transactions {
-            return Err(IndexError);
+            return Err(IndexError(format!(
+                "Index {} is beyond the {} transactions in this span",
+                index, total_transactions)));
         }
 
         // Discard any transfers without transactions in this span.
@@ -883,7 +892,10 @@ impl ItemSource<TrafficItem> for Capture {
             // Check how many active transfers remain.
             match active_transfers.len() {
                 // If none remain, we cannot retrieve a transaction.
-                0 => return Err(IndexError),
+                0 => return Err(IndexError(format!(concat!(
+                    "Active transfers ended after {} transactions, ",
+                    "unable to reach index {}"),
+                    transactions_skipped, index))),
                 // If only one remains, we can now fetch directly.
                 1 => {
                     let transfer = &active_transfers[0];
@@ -943,7 +955,7 @@ impl ItemSource<TrafficItem> for Capture {
         }
 
         // If we get to here, something doesn't add up right.
-        Err(IndexError)
+        Err(IndexError(String::from("Somehow fell out of search loop")))
     }
 
     fn summary(&mut self, item: &TrafficItem)
@@ -953,7 +965,11 @@ impl ItemSource<TrafficItem> for Capture {
         Ok(match item {
             Packet(.., packet_id) => {
                 let packet = self.packet(*packet_id)?;
-                let pid = PID::from(*packet.get(0).ok_or(IndexError)?);
+                let first_byte = *packet.get(0).ok_or_else(||
+                    IndexError(format!(
+                        "Packet {} is empty, cannot retrieve PID",
+                        packet_id)))?;
+                let pid = PID::from(first_byte);
                 format!("{} packet{}",
                     pid,
                     match PacketFields::from_packet(&packet) {
@@ -1204,7 +1220,8 @@ impl ItemSource<DeviceItem> for Capture {
             EndpointDescriptor(dev, conf, iface, ep) =>
                 EndpointDescriptorField(*dev, *conf, *iface, *ep,
                     EndpointField(index.try_into()?)),
-            _ => return Err(IndexError)
+            _ => return Err(IndexError(String::from(
+                "This device item type cannot have children")))
         })
     }
 
