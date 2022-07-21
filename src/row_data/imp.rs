@@ -8,12 +8,12 @@ use crate::tree_list_model::ItemRc;
 // directly from the outside.
 #[derive(Default)]
 pub struct TrafficRowData {
-    pub(super) node: RefCell<Option<ItemRc<TrafficItem>>>,
+    pub(super) node: RefCell<Option<Result<ItemRc<TrafficItem>, String>>>,
 }
 
 #[derive(Default)]
 pub struct DeviceRowData {
-    pub(super) node: RefCell<Option<ItemRc<DeviceItem>>>,
+    pub(super) node: RefCell<Option<Result<ItemRc<DeviceItem>, String>>>,
 }
 
 // Basic declaration of our type for the GObject type system

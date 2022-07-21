@@ -535,8 +535,10 @@ where Item: Copy + Debug,
         if position >= self.n_items() {
             return None
         }
-        let node = self.fetch(position as u64).ok()?;
-        let rowdata = RowData::new(node);
-        Some(rowdata.upcast::<Object>())
+        let node_or_err_msg =
+            self.fetch(position as u64)
+                .map_err(|e| format!("{:?}", e));
+        let row_data = RowData::new(node_or_err_msg);
+        Some(row_data.upcast::<Object>())
     }
 }

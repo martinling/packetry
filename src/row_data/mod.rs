@@ -22,32 +22,32 @@ glib::wrapper! {
 }
 
 pub trait GenericRowData<Item> where Item: Copy {
-    fn new(node: ItemRc<Item>) -> Self;
-    fn node(&self) -> ItemRc<Item>;
+    fn new(node: Result<ItemRc<Item>, String>) -> Self;
+    fn node(&self) -> Result<ItemRc<Item>, String>;
 }
 
 impl GenericRowData<TrafficItem> for TrafficRowData {
-    fn new(node: ItemRc<TrafficItem>) -> TrafficRowData {
+    fn new(node: Result<ItemRc<TrafficItem>, String>) -> TrafficRowData {
         let row: TrafficRowData =
             glib::Object::new(&[]).expect("Failed to create row data");
         row.imp().node.replace(Some(node));
         row
     }
 
-    fn node(&self) -> ItemRc<TrafficItem> {
+    fn node(&self) -> Result<ItemRc<TrafficItem>, String> {
         self.imp().node.borrow().as_ref().unwrap().clone()
     }
 }
 
 impl GenericRowData<DeviceItem> for DeviceRowData {
-    fn new(node: ItemRc<DeviceItem>) -> DeviceRowData {
+    fn new(node: Result<ItemRc<DeviceItem>, String>) -> DeviceRowData {
         let row: DeviceRowData =
             glib::Object::new(&[]).expect("Failed to create row data");
         row.imp().node.replace(Some(node));
         row
     }
 
-    fn node(&self) -> ItemRc<DeviceItem> {
+    fn node(&self) -> Result<ItemRc<DeviceItem>, String> {
         self.imp().node.borrow().as_ref().unwrap().clone()
     }
 }
