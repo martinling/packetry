@@ -183,20 +183,8 @@ where Item: Copy,
         Ok(())
     }
 
-    // The following methods correspond to the ListModel interface, and can be
-    // called by a GObject wrapper class to implement that interface.
-
-    pub fn n_items(&self) -> u32 {
-        self.root.borrow().child_count
-    }
-
-    pub fn item(&self, position: u32) -> Option<Object> {
-        // First check that the position is valid (must be within the root node's `child_count`).
+    fn fetch(&self, position: u32) -> Result<Rc<RefCell<TreeNode<Item>>>, ModelError> {
         let mut parent_ref = self.root.clone();
-        if position >= parent_ref.borrow().child_count {
-            return None
-        }
-
         let mut relative_position = position;
         'outer: loop {
             for (_, node_rc) in parent_ref.clone().borrow().children.iter() {
@@ -206,7 +194,7 @@ where Item: Copy,
                     break;
                 // If the position matches this node, return it.
                 } else if relative_position == node.item_index {
-                    return Some(RowData::new(node_rc.clone()).upcast::<Object>());
+                    return Ok(node_rc.clone());
                 // If the position is within this node's children, traverse down the tree and repeat.
                 } else if relative_position <= node.item_index + node.child_count {
                     parent_ref = node_rc.clone();
@@ -222,20 +210,36 @@ where Item: Copy,
         }
 
         // If we've broken out to this point, the node must be directly below `parent` - look it up.
-        let mut cap = self.capture.lock().ok()?;
+        let mut cap = self.capture.lock().or(Err(ModelError::LockError))?;
         let parent = parent_ref.borrow();
-        let item = cap.item(&parent.item, relative_position as u64).ok()?;
-        let child_count = cap.child_count(&item).ok()?;
+        let item = cap.item(&parent.item, relative_position as u64)?;
+        let child_count = cap.child_count(&item)?;
         let node = TreeNode {
             item: Some(item),
             expanded: false,
             parent: Some(Rc::downgrade(&parent_ref)),
             item_index: relative_position,
-            child_count: child_count.try_into().ok()?,
+            child_count: child_count.try_into()?,
             children: Default::default(),
         };
-        let rowdata = RowData::new(Rc::new(RefCell::new(node)));
 
-        Some(rowdata.upcast::<Object>())
+        Ok(Rc::new(RefCell::new(node)))
+    }
+
+    // The following methods correspond to the ListModel interface, and can be
+    // called by a GObject wrapper class to implement that interface.
+
+    pub fn n_items(&self) -> u32 {
+        self.root.borrow().child_count
+    }
+
+    pub fn item(&self, position: u32) -> Option<Object> {
+        // First check that the position is valid (must be within the root node's `child_count`).
+        if position >= self.root.borrow().child_count {
+            return None
+        }
+        let node_or_err_msg = self.fetch(position).map_err(|e| format!("{:?}", e));
+        let row_data = RowData::new(node_or_err_msg);
+        Some(row_data.upcast::<Object>())
     }
 }
