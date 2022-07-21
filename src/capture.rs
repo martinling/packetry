@@ -766,7 +766,7 @@ impl ItemSource<TrafficItem> for Capture {
                 let entry = self.transfer_index.get(*transfer_id)?;
                 let ep_transfer_id = entry.transfer_id();
                 if !entry.is_start() {
-                    return Err(IndexError)
+                    return Ok(IntervalEnd::Complete(index))
                 }
                 let ep_traf = self.endpoint_traffic(entry.endpoint_id())?;
                 if ep_transfer_id.value >= ep_traf.end_index.len() {
