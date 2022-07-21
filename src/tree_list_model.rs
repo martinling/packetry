@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::cmp::{max, min};
+use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::num::TryFromIntError;
 use std::rc::{Rc, Weak};
@@ -38,7 +39,7 @@ use ModelError::{ParentDropped, LockError, AlreadyDone, InternalError};
 pub type ItemRc<Item> = Rc<RefCell<ItemNode<Item>>>;
 pub type NodeRc<Item> = Rc<RefCell<dyn Node<Item>>>;
 
-pub trait Node<Item> {
+pub trait Node<Item> : Debug {
     /// Item at this node, if not the root.
     fn item(&self) -> Option<Item>;
 
@@ -54,11 +55,13 @@ pub trait Node<Item> {
                     expanded: bool);
 }
 
+#[derive(Debug)]
 pub struct RootNode<Item> {
     /// Interval tree of expanded top level items.
-    expanded: RBTree<u64, AugData, ItemRc<Item>>,
+    expanded: IntervalTree<Item>,
 }
 
+#[derive(Debug)]
 pub struct ItemNode<Item> {
     /// The item at this node.
     item: Item,
@@ -74,6 +77,16 @@ pub struct ItemNode<Item> {
 
     /// Expanded children of this item, by index.
     expanded: BTreeMap<u64, ItemRc<Item>>,
+}
+
+struct IntervalTree<Item>(RBTree<u64, AugData, ItemRc<Item>>);
+
+impl<Item> Debug for IntervalTree<Item> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>)
+        -> Result<(), std::fmt::Error>
+    {
+        write!(f, "IntervalTree")
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -106,17 +119,17 @@ impl<Item> Augment<AugData> for
     }
 }
 
-impl<Item> Node<Item> for RootNode<Item> {
+impl<Item> Node<Item> for RootNode<Item> where Item: Debug {
     fn item(&self) -> Option<Item> {
         None
     }
 
     fn has_expanded(&self, index: u64) -> bool {
-        self.expanded.search(index).is_some()
+        self.expanded.0.search(index).is_some()
     }
 
     fn get_expanded(&self, index: u64) -> Option<ItemRc<Item>> {
-        self.expanded.search(index).map(Rc::clone)
+        self.expanded.0.search(index).map(Rc::clone)
     }
 
     fn set_expanded(&mut self,
@@ -129,16 +142,14 @@ impl<Item> Node<Item> for RootNode<Item> {
             last_end: node.interval.end,
         };
         if expanded {
-            self.expanded.insert(start, aug_data, node_ref.clone());
+            self.expanded.0.insert(start, aug_data, node_ref.clone());
         } else {
-            self.expanded.delete(start);
+            self.expanded.0.delete(start);
         }
     }
 }
 
-impl<Item> Node<Item> for ItemNode<Item>
-where Item: Copy
-{
+impl<Item> Node<Item> for ItemNode<Item> where Item: Copy + Debug {
     fn item(&self) -> Option<Item> {
         Some(self.item)
     }
@@ -165,7 +176,7 @@ where Item: Copy
     }
 }
 
-impl<Item> ItemNode<Item> where Item: Copy {
+impl<Item> ItemNode<Item> where Item: Copy + Debug {
     pub fn expanded(&self) -> bool {
         match self.parent.upgrade() {
             Some(parent_ref) => {
@@ -201,13 +212,13 @@ impl<Item> ItemNode<Item> where Item: Copy {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Source<Item> {
     Children(NodeRc<Item>),
     Interleaved(Vec<ItemRc<Item>>, Range<u64>),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Region<Item> {
     source: Rc<Source<Item>>,
     offset: u64
@@ -235,7 +246,7 @@ fn clamp(value: u64, maximum: u64) -> u32 {
 }
 
 impl<Item: 'static, RowData> TreeListModel<Item, RowData>
-where Item: Copy,
+where Item: Copy + Debug,
       RowData: GenericRowData<Item> + IsA<Object> + Cast,
       Capture: ItemSource<Item>
 {
@@ -250,7 +261,7 @@ where Item: Copy,
             row_count: item_count,
             regions: BTreeMap::new(),
             root: Rc::new(RefCell::new(RootNode {
-                expanded: RBTree::new(),
+                expanded: IntervalTree(RBTree::new()),
             })),
         };
         model.regions.insert(0,
@@ -447,6 +458,12 @@ where Item: Copy,
         let node = node_ref.borrow();
         let parent_ref = node.parent.upgrade().ok_or(ParentDropped)?;
         parent_ref.borrow_mut().set_expanded(node_ref, expanded);
+
+        println!();
+        println!("Region map:");
+        for (start, region) in self.regions.iter() {
+            println!("{}: {:#?}", start, region);
+        }
 
         Ok(update)
     }

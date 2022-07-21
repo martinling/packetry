@@ -8,6 +8,7 @@ mod expander;
 mod tree_list_model;
 mod interval;
 
+use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
 use gtk::gio::ListModel;
@@ -39,7 +40,7 @@ mod vec_map;
 fn create_view<Item: 'static, Model, RowData>(capture: &Arc<Mutex<Capture>>)
         -> ListView
     where
-        Item: Copy,
+        Item: Copy + Debug,
         Model: GenericModel<Item> + IsA<ListModel>,
         RowData: GenericRowData<Item> + IsA<Object>,
         Capture: ItemSource<Item>

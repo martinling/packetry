@@ -43,14 +43,14 @@ pub type EndpointByteCount = u64;
 pub type EndpointTransactionCount = u64;
 pub type TrafficItemIdOffset = u64;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum TrafficItem {
     Transfer(TransferId),
     Transaction(TransferId, TransactionId),
     Packet(TransferId, TransactionId, PacketId),
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum DeviceItem {
     Device(DeviceId),
     DeviceDescriptor(DeviceId),

@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Sub};
 use std::ops::Range;
@@ -6,6 +7,14 @@ use std::ops::Range;
 pub struct Id<T> {
    _marker: PhantomData<T>,
    pub value: u64
+}
+
+impl<T> Debug for Id<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>)
+        -> Result<(), std::fmt::Error>
+    {
+        write!(f, "Id({})", self.value)
+    }
 }
 
 pub trait HasLength {
