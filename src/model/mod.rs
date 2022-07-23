@@ -3,6 +3,7 @@
 mod imp;
 
 use std::sync::{Arc, Mutex};
+use std::cmp::min;
 
 use gtk::subclass::prelude::*;
 use gtk::prelude::ListModelExt;
@@ -10,6 +11,12 @@ use gtk::{gio, glib};
 
 use crate::capture::{Capture, TrafficItem, DeviceItem};
 use crate::tree_list_model::{TreeListModel, ItemRc, ModelError};
+
+pub const MAX_ROWS: u64 = u32::MAX as u64;
+
+pub fn clamp(value: u64, maximum: u64) -> u32 {
+    min(value, maximum) as u32
+}
 
 // Public part of the Model type.
 glib::wrapper! {
@@ -46,8 +53,15 @@ impl GenericModel<TrafficItem> for TrafficModel {
             .unwrap()
             .set_expanded(node, position as u64, expanded)?;
 
+        let position = clamp(update.position, MAX_ROWS);
+        let rows_addressable = MAX_ROWS - position as u64;
+        let rows_removed = clamp(update.rows_removed, rows_addressable);
+        let rows_added = clamp(update.rows_added, rows_addressable);
+
         self.items_changed(
-            update.position, update.rows_removed, update.rows_added);
+            position as u32,
+            rows_removed as u32,
+            rows_added as u32);
 
         Ok(())
     }
@@ -74,8 +88,15 @@ impl GenericModel<DeviceItem> for DeviceModel {
             .unwrap()
             .set_expanded(node, position as u64, expanded)?;
 
+        let position = clamp(update.position, MAX_ROWS);
+        let rows_addressable = MAX_ROWS - position as u64;
+        let rows_removed = clamp(update.rows_removed, rows_addressable);
+        let rows_added = clamp(update.rows_added, rows_addressable);
+
         self.items_changed(
-            update.position, update.rows_removed, update.rows_added);
+            position as u32,
+            rows_removed as u32,
+            rows_added as u32);
 
         Ok(())
     }

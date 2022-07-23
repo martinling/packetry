@@ -49,10 +49,8 @@ pub trait Node<Item> : Debug {
     /// Get the expanded child node with this index.
     fn get_expanded(&self, index: u64) -> Option<ItemRc<Item>>;
 
-    /// Set whether the this child of the node is expanded.
-    fn set_expanded(&mut self,
-                    node_ref: &ItemRc<Item>,
-                    expanded: bool);
+    /// Set whether this child of the node is expanded.
+    fn set_expanded(&mut self, child_rc: &ItemRc<Item>, expanded: bool);
 }
 
 #[derive(Debug)]
@@ -132,17 +130,14 @@ impl<Item> Node<Item> for RootNode<Item> where Item: Debug {
         self.expanded.0.search(index).map(Rc::clone)
     }
 
-    fn set_expanded(&mut self,
-                    node_ref: &ItemRc<Item>,
-                    expanded: bool)
-    {
-        let node = node_ref.borrow();
-        let start = node.interval.start;
+    fn set_expanded(&mut self, child_rc: &ItemRc<Item>, expanded: bool) {
+        let child = child_rc.borrow();
+        let start = child.interval.start;
         let aug_data = AugData {
-            last_end: node.interval.end,
+            last_end: child.interval.end,
         };
         if expanded {
-            self.expanded.0.insert(start, aug_data, node_ref.clone());
+            self.expanded.0.insert(start, aug_data, child_rc.clone());
         } else {
             self.expanded.0.delete(start);
         }
@@ -162,25 +157,30 @@ impl<Item> Node<Item> for ItemNode<Item> where Item: Copy + Debug {
         self.expanded.get(&index).map(Rc::clone)
     }
 
-    fn set_expanded(&mut self,
-                    node_ref: &ItemRc<Item>,
-                    expanded: bool)
-    {
-        let node = node_ref.borrow();
-        let start = node.interval.start;
+    fn set_expanded(&mut self, child_rc: &ItemRc<Item>, expanded: bool) {
+        let child = child_rc.borrow();
+        let start = child.interval.start;
         if expanded {
-            self.expanded.insert(start, node_ref.clone());
+            self.expanded.insert(start, child_rc.clone());
         } else {
             self.expanded.remove(&start);
         }
     }
 }
 
-impl<Item> ItemNode<Item> where Item: Copy + Debug {
+impl<Item: 'static> ItemNode<Item> where Item: Copy + Debug {
+    pub fn parent_is(&self, node_ref: &ItemRc<Item>)
+        -> Result<bool, ModelError>
+    {
+        let parent_ref = self.parent.upgrade().ok_or(ParentDropped)?;
+        let node_ref: NodeRc<Item> = node_ref.clone();
+        Ok(Rc::ptr_eq(&parent_ref, &node_ref))
+    }
+
     pub fn expanded(&self) -> bool {
         match self.parent.upgrade() {
-            Some(parent_ref) => {
-                let parent = parent_ref.borrow();
+            Some(parent_rc) => {
+                let parent = parent_rc.borrow();
                 parent.has_expanded(self.interval.start)
             },
             // Parent is dropped, so node cannot be expanded.
@@ -214,7 +214,8 @@ impl<Item> ItemNode<Item> where Item: Copy + Debug {
 
 #[derive(Clone, Debug)]
 pub enum Source<Item> {
-    Children(NodeRc<Item>),
+    Root,
+    Children(ItemRc<Item>),
     Interleaved(Vec<ItemRc<Item>>, Range<u64>),
 }
 
@@ -225,9 +226,9 @@ pub struct Region<Item> {
 }
 
 pub struct ModelUpdate {
-    pub position: u32,
-    pub rows_removed: u32,
-    pub rows_added: u32,
+    pub position: u64,
+    pub rows_removed: u64,
+    pub rows_added: u64,
 }
 
 pub struct TreeListModel<Item, RowData> {
@@ -237,12 +238,6 @@ pub struct TreeListModel<Item, RowData> {
     root: Rc<RefCell<RootNode<Item>>>,
     item_count: u64,
     row_count: u64,
-}
-
-const MAX_ROWS: u64 = u32::MAX as u64;
-
-fn clamp(value: u64, maximum: u64) -> u32 {
-    min(value, maximum) as u32
 }
 
 impl<Item: 'static, RowData> TreeListModel<Item, RowData>
@@ -266,7 +261,7 @@ where Item: Copy + Debug,
         };
         model.regions.insert(0,
             Region {
-                source: Rc::new(Children(model.root.clone())),
+                source: Rc::new(Root),
                 offset: 0
             });
         Ok(model)
@@ -329,6 +324,7 @@ where Item: Copy + Debug,
         let rows_changed = match source {
             Interleaved(_, ref range) => range.len() - 1,
             Children(_) => 0,
+            Root => unreachable!(),
         };
 
         // Split the current region if it has rows after this one.
@@ -340,8 +336,8 @@ where Item: Copy + Debug,
             });
 
         // Shift all following regions down by the length of the new region.
+        let region_length = rows_changed + rows_added;
         for (start, region) in self.regions.split_off(&position) {
-            let region_length = rows_changed + rows_added;
             self.regions.insert(start + region_length, region);
         }
 
@@ -355,12 +351,10 @@ where Item: Copy + Debug,
         // Update total row count.
         self.row_count += rows_added;
 
-        // Clamp effects to u32 rows and return changes.
-        let rows_addressable = MAX_ROWS - position;
         Ok(ModelUpdate {
-            position: clamp(position, MAX_ROWS),
-            rows_removed: clamp(rows_changed, rows_addressable),
-            rows_added: clamp(rows_changed + rows_added, rows_addressable),
+            position,
+            rows_removed: rows_changed,
+            rows_added: rows_changed + rows_added,
         })
     }
 
@@ -375,17 +369,18 @@ where Item: Copy + Debug,
             InternalError(format!(
                 "No region to delete at position {}", position)))?;
 
-        // Get number of rows removed and replaced.
+        // Get number of rows removed and replaced by deleting this region.
         use Source::*;
         let rows_removed = node_ref.borrow().child_count;
         let rows_changed = match region.source.as_ref() {
             Interleaved(_, range) => range.len() - 1,
             Children(_) => 0,
+            Root => unreachable!(),
         };
 
         // Shift all following regions up by the length of the removed region.
+        let region_length = rows_changed + rows_removed;
         for (start, region) in self.regions.split_off(&position) {
-            let region_length = rows_changed + rows_removed;
             self.regions.insert(start - region_length, region);
         }
 
@@ -400,12 +395,10 @@ where Item: Copy + Debug,
         // Update total row count.
         self.row_count -= rows_removed;
 
-        // Clamp effects to u32 rows and return changes.
-        let rows_addressable = MAX_ROWS - position;
         Ok(ModelUpdate {
-            position: clamp(position, MAX_ROWS),
-            rows_removed: clamp(rows_changed + rows_removed, rows_addressable),
-            rows_added: clamp(rows_changed, rows_addressable),
+            position,
+            rows_removed: rows_changed + rows_removed,
+            rows_added: rows_changed,
         })
     }
 
@@ -435,22 +428,30 @@ where Item: Copy + Debug,
             let offset = region.offset + position - start;
             self.insert_region(position, node_ref, &source, offset)?
         } else {
-            // Collapse the children of this node and count the rows removed.
-            let children = node_ref.borrow().expanded.clone().into_iter();
+            // Collapse children of this node, from last to first.
             let mut child_rows_removed = 0;
-            for (i, child_ref) in children {
-                child_rows_removed +=
-                    self.set_expanded(&child_ref, position + i, false)?
-                        .rows_removed as u64;
+            for (start, region) in self.regions
+                .clone()
+                .range(position..)
+                .rev()
+            {
+                use Source::*;
+                if let Children(child_ref) = region.source.as_ref() {
+                    if child_ref.borrow().parent_is(node_ref)? {
+                        // The child is at the row before its region.
+                        let child_pos = *start - 1;
+                        let update =
+                            self.set_expanded(child_ref, child_pos, false)?;
+                        child_rows_removed += update.rows_removed;
+                    }
+                }
             }
 
             // Delete the region associated with this node.
-            let mut update =
-                self.delete_region(position, node_ref, &source)?;
+            let mut update = self.delete_region(position, node_ref, &source)?;
 
-            // Include removal of collapsed child rows in the model update.
-            let rows_removed = update.rows_removed as u64 + child_rows_removed;
-            update.rows_removed = clamp(rows_removed, MAX_ROWS - position);
+            // Include results of collapsing children in rows removed.
+            update.rows_removed += child_rows_removed;
             update
         };
 
@@ -462,7 +463,7 @@ where Item: Copy + Debug,
         println!();
         println!("Region map:");
         for (start, region) in self.regions.iter() {
-            println!("{}: {:#?}", start, region);
+            println!("{}: {:?}", start, region);
         }
 
         Ok(update)
@@ -483,11 +484,18 @@ where Item: Copy + Debug,
         use Source::*;
         use SearchResult::*;
         Ok(match region.source.as_ref() {
+            // Region containing only children of the root.
+            Root => {
+                let item = cap.item(&None, index)?;
+                let root_rc: NodeRc<Item> = self.root.clone();
+                self.node(cap, &root_rc, index, item)?
+            }
             // Simple region containing children of a parent item.
             Children(parent_rc) => {
                 let parent_item = parent_rc.borrow().item();
                 let item = cap.item(&parent_item, index)?;
-                self.node(cap, parent_rc, index, item)?
+                let parent_rc: NodeRc<Item> = parent_rc.clone();
+                self.node(cap, &parent_rc, index, item)?
             },
             // Region requiring interleaved search.
             Interleaved(expanded_rcs, range) => {
@@ -527,7 +535,7 @@ where Item: Copy + Debug,
     // called by a GObject wrapper class to implement that interface.
 
     pub fn n_items(&self) -> u32 {
-        clamp(self.row_count, MAX_ROWS)
+        min(self.row_count, u32::MAX as u64) as u32
     }
 
     pub fn item(&self, position: u32) -> Option<Object> {

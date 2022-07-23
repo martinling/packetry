@@ -1269,7 +1269,7 @@ impl ItemSource<DeviceItem> for Capture {
     }
 
 
-    fn item_end(&mut self, _item: &DeviceItem, _index: u64)
+    fn item_end(&mut self, _item: &DeviceItem, index: u64)
         -> Result<IntervalEnd, CaptureError>
     {
         Ok(IntervalEnd::Complete(index))
