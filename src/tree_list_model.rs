@@ -40,9 +40,6 @@ pub type ItemRc<Item> = Rc<RefCell<ItemNode<Item>>>;
 pub type NodeRc<Item> = Rc<RefCell<dyn Node<Item>>>;
 
 pub trait Node<Item> : Debug {
-    /// Item at this node, if not the root.
-    fn item(&self) -> Option<Item>;
-
     /// Whether this node has an expanded child at this index.
     fn has_expanded(&self, index: u64) -> bool;
 
@@ -118,10 +115,6 @@ impl<Item> Augment<AugData> for
 }
 
 impl<Item> Node<Item> for RootNode<Item> where Item: Debug {
-    fn item(&self) -> Option<Item> {
-        None
-    }
-
     fn has_expanded(&self, index: u64) -> bool {
         self.expanded.0.search(index).is_some()
     }
@@ -145,10 +138,6 @@ impl<Item> Node<Item> for RootNode<Item> where Item: Debug {
 }
 
 impl<Item> Node<Item> for ItemNode<Item> where Item: Copy + Debug {
-    fn item(&self) -> Option<Item> {
-        Some(self.item)
-    }
-
     fn has_expanded(&self, index: u64) -> bool {
         self.expanded.contains_key(&index)
     }
@@ -492,8 +481,8 @@ where Item: Copy + Debug,
             }
             // Simple region containing children of a parent item.
             Children(parent_rc) => {
-                let parent_item = parent_rc.borrow().item();
-                let item = cap.item(&parent_item, index)?;
+                let parent_item = parent_rc.borrow().item;
+                let item = cap.child_item(&parent_item, index)?;
                 let parent_rc: NodeRc<Item> = parent_rc.clone();
                 self.node(cap, &parent_rc, index, item)?
             },
