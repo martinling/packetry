@@ -195,7 +195,6 @@ where Item: 'static
 
 #[derive(Clone)]
 pub enum Source<Item> {
-    Root,
     Children(ItemRc<Item>),
     Interleaved(Vec<ItemRc<Item>>, Range<u64>),
 }
@@ -214,8 +213,6 @@ where Item: Clone + Debug
     {
         use Source::*;
         match self.source.as_ref() {
-            Root =>
-                write!(f, "Top level items"),
             Children(rc) =>
                 write!(f, "Children of {:?}", rc.borrow().item),
             Interleaved(expanded, range) =>
@@ -266,7 +263,7 @@ where Item: Copy + Debug + 'static,
         };
         model.regions.insert(0,
             Region {
-                source: Rc::new(Root),
+                source: Rc::new(Interleaved(vec![], 0..item_count)),
                 offset: 0
             });
         Ok(model)
@@ -329,7 +326,6 @@ where Item: Copy + Debug + 'static,
         let rows_changed = match source {
             Interleaved(_, ref range) => range.len() - 1,
             Children(_) => 0,
-            Root => unreachable!(),
         };
 
         // Split the current region if it has rows after this one.
@@ -380,7 +376,6 @@ where Item: Copy + Debug + 'static,
         let rows_changed = match region.source.as_ref() {
             Interleaved(_, range) => range.len() - 1,
             Children(_) => 0,
-            Root => unreachable!(),
         };
 
         // Shift all following regions up by the length of the removed region.
@@ -489,12 +484,6 @@ where Item: Copy + Debug + 'static,
         use Source::*;
         use SearchResult::*;
         Ok(match region.source.as_ref() {
-            // Region containing only children of the root.
-            Root => {
-                let item = cap.item(&None, index)?;
-                let root_rc: NodeRc<Item> = self.root.clone();
-                self.node(cap, &root_rc, index, item)?
-            }
             // Simple region containing children of a parent item.
             Children(parent_rc) => {
                 let parent_item = parent_rc.borrow().item;
