@@ -206,7 +206,9 @@ pub struct Region<Item> {
     offset: u64
 }
 
-impl<Item: Clone + Debug> Debug for Region<Item> {
+impl<Item> Debug for Region<Item>
+where Item: Clone + Debug
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>)
         -> Result<(), std::fmt::Error>
     {
@@ -243,8 +245,8 @@ pub struct TreeListModel<Item, RowData> {
     row_count: u64,
 }
 
-impl<Item: 'static, RowData> TreeListModel<Item, RowData>
-where Item: Copy + Debug,
+impl<Item, RowData> TreeListModel<Item, RowData>
+where Item: Copy + Debug + 'static,
       RowData: GenericRowData<Item> + IsA<Object> + Cast,
       Capture: ItemSource<Item>
 {
