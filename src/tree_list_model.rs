@@ -39,7 +39,7 @@ use ModelError::{ParentDropped, LockError, AlreadyDone, InternalError};
 pub type ItemRc<Item> = Rc<RefCell<ItemNode<Item>>>;
 pub type NodeRc<Item> = Rc<RefCell<dyn Node<Item>>>;
 
-pub trait Node<Item> : Debug {
+pub trait Node<Item> {
     /// Whether this node has an expanded child at this index.
     fn has_expanded(&self, index: u64) -> bool;
 
@@ -50,13 +50,11 @@ pub trait Node<Item> : Debug {
     fn set_expanded(&mut self, child_rc: &ItemRc<Item>, expanded: bool);
 }
 
-#[derive(Debug)]
 pub struct RootNode<Item> {
     /// Interval tree of expanded top level items.
     expanded: IntervalTree<Item>,
 }
 
-#[derive(Debug)]
 pub struct ItemNode<Item> {
     /// The item at this node.
     item: Item,
@@ -75,14 +73,6 @@ pub struct ItemNode<Item> {
 }
 
 struct IntervalTree<Item>(RBTree<u64, AugData, ItemRc<Item>>);
-
-impl<Item> Debug for IntervalTree<Item> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>)
-        -> Result<(), std::fmt::Error>
-    {
-        write!(f, "IntervalTree")
-    }
-}
 
 #[derive(Copy, Clone)]
 pub struct AugData {
@@ -114,7 +104,7 @@ impl<Item> Augment<AugData> for
     }
 }
 
-impl<Item> Node<Item> for RootNode<Item> where Item: Debug {
+impl<Item> Node<Item> for RootNode<Item> {
     fn has_expanded(&self, index: u64) -> bool {
         self.expanded.0.search(index).is_some()
     }
@@ -137,7 +127,7 @@ impl<Item> Node<Item> for RootNode<Item> where Item: Debug {
     }
 }
 
-impl<Item> Node<Item> for ItemNode<Item> where Item: Copy + Debug {
+impl<Item> Node<Item> for ItemNode<Item> {
     fn has_expanded(&self, index: u64) -> bool {
         self.expanded.contains_key(&index)
     }
@@ -157,7 +147,9 @@ impl<Item> Node<Item> for ItemNode<Item> where Item: Copy + Debug {
     }
 }
 
-impl<Item: 'static> ItemNode<Item> where Item: Copy + Debug {
+impl<Item> ItemNode<Item>
+where Item: 'static
+{
     pub fn parent_is(&self, node_ref: &ItemRc<Item>)
         -> Result<bool, ModelError>
     {
