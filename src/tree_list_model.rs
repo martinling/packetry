@@ -201,17 +201,39 @@ impl<Item: 'static> ItemNode<Item> where Item: Copy + Debug {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum Source<Item> {
     Root,
     Children(ItemRc<Item>),
     Interleaved(Vec<ItemRc<Item>>, Range<u64>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Region<Item> {
     source: Rc<Source<Item>>,
     offset: u64
+}
+
+impl<Item: Clone + Debug> Debug for Region<Item> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>)
+        -> Result<(), std::fmt::Error>
+    {
+        use Source::*;
+        match self.source.as_ref() {
+            Root =>
+                write!(f, "Top level items"),
+            Children(rc) =>
+                write!(f, "Children of {:?}", rc.borrow().item),
+            Interleaved(expanded, range) =>
+                write!(f, "Interleaved search in {:?} from {:?}",
+                    range,
+                    expanded
+                        .iter()
+                        .map(|rc| rc.borrow().item.clone())
+                        .collect::<Vec<Item>>()),
+        }?;
+        write!(f, ", offset {}", self.offset)
+    }
 }
 
 pub struct ModelUpdate {
