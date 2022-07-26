@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 use std::num::TryFromIntError;
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::ops::{DerefMut, Range};
+use std::ops::{Add, DerefMut, Range};
 
 use gtk::prelude::{IsA, Cast};
 use gtk::glib::Object;
@@ -199,10 +199,27 @@ pub enum Source<Item> {
     Interleaved(Vec<ItemRc<Item>>, Range<u64>),
 }
 
+impl<Item> PartialEq for Source<Item> {
+    fn eq(&self, other: &Source<Item>) -> bool {
+        use Source::*;
+        match (self, other) {
+            (Children(a), Children(b)) => Rc::ptr_eq(a, b),
+            (Interleaved(a_exp, a_rng), Interleaved(b_exp, b_rng)) =>
+                a_rng == b_rng &&
+                a_exp.len() == b_exp.len() &&
+                a_exp.iter()
+                    .zip(b_exp.iter())
+                    .all(|(a, b)| Rc::ptr_eq(a, b)),
+            (..) => false
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Region<Item> {
-    source: Rc<Source<Item>>,
-    offset: u64
+    source: Source<Item>,
+    offset: u64,
+    length: u64,
 }
 
 impl<Item> Debug for Region<Item>
@@ -212,7 +229,7 @@ where Item: Clone + Debug
         -> Result<(), std::fmt::Error>
     {
         use Source::*;
-        match self.source.as_ref() {
+        match &self.source {
             Children(rc) =>
                 write!(f, "Children of {:?}", rc.borrow().item),
             Interleaved(expanded, range) =>
@@ -223,14 +240,27 @@ where Item: Clone + Debug
                         .map(|rc| rc.borrow().item.clone())
                         .collect::<Vec<Item>>()),
         }?;
-        write!(f, ", offset {}", self.offset)
+        write!(f, ", offset {}, length {}", self.offset, self.length)
     }
 }
 
+#[derive(Default)]
 pub struct ModelUpdate {
-    pub position: u64,
-    pub rows_removed: u64,
     pub rows_added: u64,
+    pub rows_removed: u64,
+    pub rows_changed: u64,
+}
+
+impl Add for ModelUpdate {
+    type Output = ModelUpdate;
+
+    fn add(self, other: ModelUpdate) -> ModelUpdate {
+        ModelUpdate {
+            rows_added: self.rows_added + other.rows_added,
+            rows_removed: self.rows_removed + other.rows_removed,
+            rows_changed: self.rows_changed + other.rows_changed,
+        }
+    }
 }
 
 pub struct TreeListModel<Item, RowData> {
@@ -263,8 +293,9 @@ where Item: Copy + Debug + 'static,
         };
         model.regions.insert(0,
             Region {
-                source: Rc::new(Interleaved(vec![], 0..item_count)),
-                offset: 0
+                source: Interleaved(vec![], 0..item_count),
+                offset: 0,
+                length: item_count,
             });
         Ok(model)
     }
@@ -296,11 +327,77 @@ where Item: Copy + Debug + 'static,
         })
     }
 
+    fn adapt_expanded<'exp>(&self, expanded_rcs: &'exp [ItemRc<Item>])
+        -> impl Iterator<Item=(u64, Item)> + 'exp
+    {
+        expanded_rcs.iter().map(|node_rc| {
+            let node = node_rc.borrow();
+            (node.interval.start, node.item)
+        })
+    }
+
+    fn count_added_to(&self,
+                      expanded: &[ItemRc<Item>],
+                      range: &Range<u64>,
+                      added: &ItemRc<Item>,
+                      offset: u64)
+        -> Result<u64, ModelError>
+    {
+        use SearchResult::*;
+        let node = added.borrow();
+        let item_index = node.interval.start;
+        let item = &node.item;
+        let mut expanded = self.adapt_expanded(expanded);
+        let mut cap = self.capture.lock().or(Err(LockError))?;
+        let search_result = cap.find_child(&mut expanded, range, offset)?;
+        Ok(match search_result {
+            TopLevelItem(index, _) => {
+                let item_range = range.start..index;
+                cap.count_within(item_index, item, &item_range)?
+            },
+            NextLevelItem(span_index, _, _, child) => {
+                let item_range = range.start..span_index;
+                cap.count_within(item_index, item, &item_range)? +
+                cap.count_before(item_index, item, span_index, &child)?
+            },
+        })
+    }
+
+    fn count_added(&self,
+                   expanded: &[ItemRc<Item>],
+                   range: &Range<u64>,
+                   added: &ItemRc<Item>,
+                   offset: u64,
+                   end: u64)
+        -> Result<(u64, u64), ModelError>
+    {
+        let added_before_offset =
+            self.count_added_to(expanded, range, added, offset)?;
+        let added_before_end =
+            self.count_added_to(expanded, range, added, end)?;
+        let added_after_offset = added_before_end - added_before_offset;
+        Ok((added_before_offset, added_after_offset))
+    }
+
+    fn count_within(&self,
+                    expanded: &[ItemRc<Item>],
+                    range: &Range<u64>)
+        -> Result<u64, ModelError>
+    {
+        let mut cap = self.capture.lock().or(Err(LockError))?;
+        Ok(self
+            .adapt_expanded(expanded)
+            .map(|(index, item)| cap.count_within(index, &item, range))
+            .collect::<Result<Vec<u64>, CaptureError>>()?
+            .iter()
+            .sum())
+    }
+
     pub fn insert_region(&mut self,
                          position: u64,
                          node_ref: &ItemRc<Item>,
-                         parent_source: &Rc<Source<Item>>,
-                         offset: u64)
+                         parent_start: u64,
+                         parent: &Region<Item>)
         -> Result<ModelUpdate, ModelError>
     {
         // Construct source for the new region.
@@ -321,48 +418,147 @@ where Item: Copy + Debug + 'static,
                 Children(node_ref.clone()),
         };
 
-        // Get number of rows added and replaced.
-        let rows_added = node_ref.borrow().child_count;
-        let rows_changed = match source {
-            Interleaved(_, ref range) => range.len() - 1,
-            Children(_) => 0,
-        };
-
-        // Split the current region if it has rows after this one.
+        // Split the parent region if it has rows after this one.
+        let relative_position = position - parent_start;
         self.regions
             .entry(position)
             .or_insert_with(|| Region {
-                source: parent_source.clone(),
-                offset: offset + rows_changed,
+                source: parent.source.clone(),
+                offset: parent.offset + relative_position,
+                length: parent.length - relative_position,
             });
 
-        // Shift all following regions down by the length of the new region.
-        let region_length = rows_changed + rows_added;
-        for (start, region) in self.regions.split_off(&position) {
-            self.regions.insert(start + region_length, region);
+        // Remove all following regions, to iterate over and replace them.
+        let mut following_regions = self.regions
+            .split_off(&position)
+            .into_iter();
+
+        // Start constructing update.
+        let mut update = ModelUpdate::default();
+
+        // When adding a new interval, update all regions that it overlaps.
+        if let Interleaved(_, new_range) = &source {
+            while let Some((start, region)) = following_regions.next() {
+                match &region.source {
+                    Interleaved(expanded, range) => {
+                        if !self.overlap_region(
+                            start, &region,
+                            expanded, range,
+                            node_ref, new_range,
+                            &mut update)?
+                        {
+                            // No further overlapping regions.
+                            break;
+                        }
+                    }
+                    Children(_) => {
+                        // Region is self-contained, so just shift it down.
+                        self.regions.insert(
+                            start + update.rows_added,
+                            region);
+                    }
+                }
+            }
+        }
+
+        // Shift all remaining regions down by the added rows.
+        for (start, region) in following_regions {
+            self.regions.insert(start + update.rows_added, region);
         }
 
         // Insert new region.
-        self.regions.insert(position,
-            Region {
-                source: Rc::new(source),
-                offset: 0
-            });
+        let (next_start, _) = self.regions.range(position..).next().unwrap();
+        let next_start = *next_start;
+        self.regions.insert(position, Region {
+            source,
+            offset: 0,
+            length: next_start - position,
+        });
 
         // Update total row count.
-        self.row_count += rows_added;
+        self.row_count += update.rows_added;
 
-        Ok(ModelUpdate {
-            position,
-            rows_removed: rows_changed,
-            rows_added: rows_changed + rows_added,
-        })
+        Ok(update)
+    }
+
+    fn overlap_region(&mut self,
+                      start: u64,
+                      region: &Region<Item>,
+                      expanded: &[ItemRc<Item>],
+                      range: &Range<u64>,
+                      node_ref: &ItemRc<Item>,
+                      new_range: &Range<u64>,
+                      update: &mut ModelUpdate)
+        -> Result<bool, ModelError>
+    {
+        use Source::*;
+
+        if range.start >= new_range.end {
+            // The new interval does not overlap this region.
+            self.regions.insert(start + update.rows_added, region.clone());
+            return Ok(false)
+        }
+
+        // Add this interval to those expanded in this region.
+        let mut new_expanded = expanded.to_vec();
+        new_expanded.push(node_ref.clone());
+
+        if range.end <= new_range.end {
+            // The new interval overlaps this whole region.
+            // Count rows added before and after its offset.
+            let (added_before_offset, added_after_offset) =
+                self.count_added(expanded, range, node_ref,
+                                 region.offset, region.length)?;
+            // Replace with a new region.
+            self.regions.insert(start + update.rows_added, Region {
+                source: Interleaved(new_expanded, range.clone()),
+                offset: region.offset + added_before_offset,
+                length: region.length + added_after_offset,
+            });
+            update.rows_changed += region.length;
+            update.rows_added += added_after_offset;
+            Ok(true)
+        } else {
+            // May need to split this region into two, since the new interval
+            // only overlaps part of its source.
+            let first_range = range.start..new_range.end;
+            let second_range = new_range.end..range.end;
+            // Work out the row at which this region splits.
+            let split_offset = self.count_within(expanded, &first_range)?;
+            if region.offset >= split_offset {
+                // This region begins after the split, so it doesn't
+                // overlap with the new interval.
+                self.regions.insert(start + update.rows_added, region.clone());
+                Ok(false)
+            } else {
+                // We need to split this region into two. Work out how many
+                // rows are added before and after this region's offset.
+                let (added_before_offset, added_after_offset) =
+                    self.count_added(expanded, range, node_ref,
+                                     region.offset, split_offset)?;
+                // Insert new region for the overlapping part.
+                self.regions.insert(start + update.rows_added, Region {
+                    source: Interleaved(new_expanded, first_range),
+                    offset: region.offset + added_before_offset,
+                    length: split_offset + added_after_offset,
+                });
+                update.rows_changed += region.length;
+                update.rows_added += added_after_offset;
+                // Insert new region for the non-overlapping part.
+                self.regions.insert(start + update.rows_added, Region {
+                    source: Interleaved(expanded.to_vec(), second_range),
+                    offset: 0,
+                    length: region.length - split_offset,
+                });
+                Ok(true)
+            }
+        }
     }
 
     pub fn delete_region(&mut self,
                          position: u64,
                          node_ref: &ItemRc<Item>,
-                         parent_source: &Rc<Source<Item>>)
+                         parent_source: &Source<Item>)
         -> Result<ModelUpdate, ModelError>
     {
         // Remove the region starting after the current row.
@@ -373,7 +569,7 @@ where Item: Copy + Debug + 'static,
         // Get number of rows removed and replaced by deleting this region.
         use Source::*;
         let rows_removed = node_ref.borrow().child_count;
-        let rows_changed = match region.source.as_ref() {
+        let rows_changed = match region.source {
             Interleaved(_, range) => range.len() - 1,
             Children(_) => 0,
         };
@@ -387,7 +583,7 @@ where Item: Copy + Debug + 'static,
         // Merge the preceding and following regions if they have the
         // same source.
         if let Some(next_region) = self.regions.get(&position) {
-            if Rc::ptr_eq(parent_source, &next_region.source) {
+            if parent_source == &next_region.source {
                 self.regions.remove(&position);
             }
         }
@@ -396,9 +592,9 @@ where Item: Copy + Debug + 'static,
         self.row_count -= rows_removed;
 
         Ok(ModelUpdate {
-            position,
-            rows_removed: rows_changed + rows_removed,
-            rows_added: rows_changed,
+            rows_added: 0,
+            rows_removed,
+            rows_changed,
         })
     }
 
@@ -412,12 +608,15 @@ where Item: Copy + Debug + 'static,
             return Err(AlreadyDone);
         }
 
-        // Fetch the region this row appears in and clone its source.
-        let (start, region) =
-            self.regions.range(..=position).next_back().ok_or_else(||
+        // Fetch the region this row appears in and clone it.
+        let (start, region) = self.regions
+            .range(..=position)
+            .next_back()
+            .ok_or_else(||
                 InternalError(format!(
                     "No region before position {}", position)))?;
-        let source = region.source.clone();
+        let start = *start;
+        let region = region.clone();
 
         // New rows will be added or removed after the current one.
         let position = position + 1;
@@ -425,8 +624,7 @@ where Item: Copy + Debug + 'static,
         // Update the region map.
         let update = if expanded {
             // Insert a new region for this node.
-            let offset = region.offset + position - start;
-            self.insert_region(position, node_ref, &source, offset)?
+            self.insert_region(position, node_ref, start, &region)?
         } else {
             // Collapse children of this node, from last to first.
             let mut child_rows_removed = 0;
@@ -436,7 +634,7 @@ where Item: Copy + Debug + 'static,
                 .rev()
             {
                 use Source::*;
-                if let Children(child_ref) = region.source.as_ref() {
+                if let Children(child_ref) = &region.source {
                     if child_ref.borrow().parent_is(node_ref)? {
                         // The child is at the row before its region.
                         let child_pos = *start - 1;
@@ -448,7 +646,8 @@ where Item: Copy + Debug + 'static,
             }
 
             // Delete the region associated with this node.
-            let mut update = self.delete_region(position, node_ref, &source)?;
+            let mut update =
+                self.delete_region(position, node_ref, &region.source)?;
 
             // Include results of collapsing children in rows removed.
             update.rows_removed += child_rows_removed;
@@ -483,7 +682,7 @@ where Item: Copy + Debug + 'static,
         let mut cap = self.capture.lock().or(Err(LockError))?;
         use Source::*;
         use SearchResult::*;
-        Ok(match region.source.as_ref() {
+        Ok(match &region.source {
             // Simple region containing children of a parent item.
             Children(parent_rc) => {
                 let parent_item = parent_rc.borrow().item;
@@ -512,7 +711,7 @@ where Item: Copy + Debug + 'static,
                         self.node(cap, &root_rc, index, item)?
                     },
                     // Search found a child of an expanded top level item.
-                    NextLevelItem(parent_index, child_index, item) => {
+                    NextLevelItem(_, parent_index, child_index, item) => {
                         // There must already be a node for its parent.
                         let parent_rc: NodeRc<Item> = self.root
                             .borrow()

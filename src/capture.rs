@@ -663,11 +663,44 @@ impl Capture {
             None => false
         })
     }
+
+    fn transfer(&mut self, item_index: u64, item: &TrafficItem)
+        -> Result<Transfer, CaptureError>
+    {
+        if let TrafficItem::Transfer(transfer_id) = item {
+            let start_item_id = TrafficItemId::from_u64(item_index);
+            let entry = self.transfer_index.get(*transfer_id)?;
+            let endpoint_id = entry.endpoint_id();
+            let ep_traf = self.endpoint_traffic(endpoint_id)?;
+            let ep_first_item_id = ep_traf.first_item_id.ok_or_else(||
+                IndexError(format!(
+                    "Endpoint ID {} has no first item", endpoint_id)))?;
+            Ok(Transfer {
+                ep_first_item_id,
+                start_item_id,
+                transfer_id: *transfer_id,
+                endpoint_id,
+                count_range: 0..0,
+                estimated_count: 0,
+            })
+        } else {
+            Err(IndexError(format!("Item {:?} is not a transfer", item)))
+        }
+    }
+
+    fn transfers(&mut self,
+                        expanded: &mut dyn Iterator<Item=(u64, TrafficItem)>)
+        -> Result<Vec<Transfer>, CaptureError>
+    {
+        expanded
+            .map(|(index, item)| self.transfer(index, &item))
+            .collect()
+    }
 }
 
 pub enum SearchResult<Item> {
     TopLevelItem(u64, Item),
-    NextLevelItem(u64, u64, Item),
+    NextLevelItem(u64, u64, u64, Item),
 }
 
 pub trait ItemSource<Item> {
@@ -680,6 +713,17 @@ pub trait ItemSource<Item> {
     fn child_count(&mut self, parent: &Item) -> Result<u64, CaptureError>;
     fn item_end(&mut self, item: &Item, index: u64)
         -> Result<IntervalEnd, CaptureError>;
+    fn count_within(&mut self,
+                    item_index: u64,
+                    item: &Item,
+                    region: &Range<u64>)
+        -> Result<u64, CaptureError>;
+    fn count_before(&mut self,
+                    item_index: u64,
+                    item: &Item,
+                    span_index: u64,
+                    child: &Item)
+        -> Result<u64, CaptureError>;
     fn find_child(&mut self,
                   expanded: &mut dyn Iterator<Item=(u64, Item)>,
                   region: &Range<u64>,
@@ -689,7 +733,7 @@ pub trait ItemSource<Item> {
     fn connectors(&mut self, item: &Item) -> Result<String, CaptureError>;
 }
 
-struct ActiveTransfer {
+struct Transfer {
     ep_first_item_id: TrafficItemId,
     start_item_id: TrafficItemId,
     transfer_id: TransferId,
@@ -794,6 +838,59 @@ impl ItemSource<TrafficItem> for Capture {
         })
     }
 
+    fn count_within(&mut self,
+                    item_index: u64,
+                    item: &TrafficItem,
+                    region: &Range<u64>)
+        -> Result<u64, CaptureError>
+    {
+        // Count the transactions of this transfer item within a region.
+        let transfer = self.transfer(item_index, item)?;
+        let ep_traf = self.endpoint_traffic(transfer.endpoint_id)?;
+        let start_item_id = TrafficItemId::from_u64(region.start);
+        let end_item_id = TrafficItemId::from_u64(region.end);
+        let start_offset = start_item_id - transfer.ep_first_item_id;
+        let end_offset = end_item_id - transfer.ep_first_item_id;
+        let start_count = ep_traf.progress_index.get(start_offset)?;
+        let end_count = ep_traf.progress_index.get(end_offset)?;
+        Ok(end_count - start_count)
+    }
+
+    fn count_before(&mut self,
+                    item_index: u64,
+                    item: &TrafficItem,
+                    span_index: u64,
+                    child: &TrafficItem)
+        -> Result<u64, CaptureError>
+    {
+        // Count the transactions of this transfer item within a span,
+        // up to the specified child transaction item.
+        let transfer = self.transfer(item_index, item)?;
+        let ep_traf = self.endpoint_traffic(transfer.endpoint_id)?;
+        let span_item_id = TrafficItemId::from_u64(span_index);
+        let span_offset = span_item_id - transfer.ep_first_item_id;
+        let count_range = ep_traf.progress_index.target_range(
+            span_offset, ep_traf.transaction_ids.len())?;
+        let transaction_count = count_range.len();
+        if let TrafficItem::Transaction(_, expected_transaction_id) = child {
+            for index in 0..transaction_count {
+                let ep_transaction_id =
+                    EndpointTransactionId::from_u64(count_range.start + index);
+                let transaction_id =
+                    ep_traf.transaction_ids.get(ep_transaction_id)?;
+                if transaction_id == *expected_transaction_id {
+                    return Ok(index)
+                }
+            }
+            Err(IndexError(format!(
+                "Child {:?} of {:?} was not found in span {}",
+                child, item, span_index)))
+        } else {
+            Err(IndexError(format!(
+                "Child {:?} is not a transaction", child)))
+        }
+    }
+
     fn find_child(&mut self,
                   expanded: &mut dyn Iterator<Item=(u64, TrafficItem)>,
                   region: &Range<u64>,
@@ -804,36 +901,17 @@ impl ItemSource<TrafficItem> for Capture {
         use TrafficItem::*;
 
         // Collect data on the expanded transfers.
-        let mut total_transactions = 0;
-        let mut active_transfers = Vec::new();
-        for (start_index, item) in expanded {
-            if let Transfer(transfer_id) = item {
-                let start_item_id = TrafficItemId::from_u64(start_index);
-                let entry = self.transfer_index.get(transfer_id)?;
-                let endpoint_id = entry.endpoint_id();
-                let ep_traf = self.endpoint_traffic(endpoint_id)?;
-                let ep_first_item_id = ep_traf.first_item_id.ok_or_else(||
-                    IndexError(format!(
-                        "Endpoint ID {} has no first item", endpoint_id)))?;
-                active_transfers.push({
-                    ActiveTransfer {
-                        ep_first_item_id,
-                        start_item_id,
-                        transfer_id,
-                        endpoint_id,
-                        count_range: 0..0,
-                        estimated_count: 0,
-                    }
-                });
-            }
-        }
+        let mut transfers = self.transfers(expanded)?;
 
         // First, find the right span: the space between two contiguous items
         // in which this transaction is to be found.
-        for span_index in region.clone() {
+        let mut total_transactions = 0;
+        let mut span_index = region.start;
+        for i in 0..region.len() {
+            span_index = region.start + i;
             let span_item_id = TrafficItemId::from_u64(span_index);
             // Count the transactions within this span.
-            for transfer in active_transfers.iter_mut() {
+            for transfer in transfers.iter_mut() {
                 let ep_traf = self.endpoint_traffic(transfer.endpoint_id)?;
                 // Find the transaction counts for this transfer at the
                 // beginning and end of this span.
@@ -874,7 +952,7 @@ impl ItemSource<TrafficItem> for Capture {
         }
 
         // Discard any transfers without transactions in this span.
-        active_transfers.retain(|transfer|
+        transfers.retain(|transfer|
             transfer.estimated_count < transfer.count_range.len());
 
         // Now we have identified the correct span, and need to find the
@@ -890,7 +968,7 @@ impl ItemSource<TrafficItem> for Capture {
 
         for transactions_skipped in 0..=index {
             // Check how many active transfers remain.
-            match active_transfers.len() {
+            match transfers.len() {
                 // If none remain, we cannot retrieve a transaction.
                 0 => return Err(IndexError(format!(concat!(
                     "Active transfers ended after {} transactions, ",
@@ -898,7 +976,7 @@ impl ItemSource<TrafficItem> for Capture {
                     transactions_skipped, index))),
                 // If only one remains, we can now fetch directly.
                 1 => {
-                    let transfer = &active_transfers[0];
+                    let transfer = &transfers[0];
                     let parent_index = transfer.start_item_id.value;
                     let child_index =
                         transfer.count_range.start +
@@ -911,14 +989,15 @@ impl ItemSource<TrafficItem> for Capture {
                         ep_traf.transaction_ids.get(ep_transaction_id)?;
                     let item = Transaction(
                         transfer.transfer_id, transaction_id);
-                    return Ok(NextLevelItem(parent_index, child_index, item))
+                    return Ok(NextLevelItem(
+                        span_index, parent_index, child_index, item))
                 }
                 // Otherwise, proceed with interleaved lookup.
                 _ => {}
             };
             // Get the next transaction ID for each transfer.
             let mut transaction_ids = Vec::new();
-            for transfer in active_transfers.iter_mut() {
+            for transfer in transfers.iter_mut() {
                 let ep_traf = self.endpoint_traffic(transfer.endpoint_id)?;
                 // Get the next transaction ID for this transfer.
                 let ep_transaction_id =
@@ -935,7 +1014,7 @@ impl ItemSource<TrafficItem> for Capture {
                 .enumerate()
                 .min_by_key(|(_, id)| id.value)
                 .unwrap();
-            let transfer = &mut active_transfers[first];
+            let transfer = &mut transfers[first];
             // If we have now reached the requested index, return the
             // transaction item with the ID we found.
             if transactions_skipped == index {
@@ -944,13 +1023,14 @@ impl ItemSource<TrafficItem> for Capture {
                 let child_index =
                     transfer.count_range.start +
                     transfer.estimated_count;
-                return Ok(NextLevelItem(parent_index, child_index, item))
+                return Ok(NextLevelItem(
+                    span_index, parent_index, child_index, item))
             }
             // Otherwise, skip that transaction and repeat.
             transfer.estimated_count += 1;
             // If its transfer has now ended, remove it from the list.
             if transfer.estimated_count == transfer.count_range.len() {
-                active_transfers.remove(first);
+                transfers.remove(first);
             }
         }
 
@@ -1273,6 +1353,25 @@ impl ItemSource<DeviceItem> for Capture {
         -> Result<IntervalEnd, CaptureError>
     {
         Ok(IntervalEnd::Complete(index))
+    }
+
+    fn count_within(&mut self,
+                    _item_index: u64,
+                    _item: &DeviceItem,
+                    _region: &Range<u64>)
+        -> Result<u64, CaptureError>
+    {
+        unimplemented!()
+    }
+
+    fn count_before(&mut self,
+                    _item_index: u64,
+                    _item: &DeviceItem,
+                    _span_index: u64,
+                    _child: &DeviceItem)
+        -> Result<u64, CaptureError>
+    {
+        unimplemented!()
     }
 
     fn find_child(&mut self,

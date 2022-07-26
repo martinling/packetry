@@ -53,10 +53,14 @@ impl GenericModel<TrafficItem> for TrafficModel {
             .unwrap()
             .set_expanded(node, position as u64, expanded)?;
 
-        let position = clamp(update.position, MAX_ROWS);
+        let position = position + 1;
         let rows_addressable = MAX_ROWS - position as u64;
-        let rows_removed = clamp(update.rows_removed, rows_addressable);
-        let rows_added = clamp(update.rows_added, rows_addressable);
+        let rows_removed = clamp(
+            update.rows_removed + update.rows_changed,
+            rows_addressable);
+        let rows_added = clamp(
+            update.rows_added + update.rows_changed,
+            rows_addressable);
 
         self.items_changed(
             position as u32,
@@ -88,10 +92,14 @@ impl GenericModel<DeviceItem> for DeviceModel {
             .unwrap()
             .set_expanded(node, position as u64, expanded)?;
 
-        let position = clamp(update.position, MAX_ROWS);
+        let position = position + 1;
         let rows_addressable = MAX_ROWS - position as u64;
-        let rows_removed = clamp(update.rows_removed, rows_addressable);
-        let rows_added = clamp(update.rows_added, rows_addressable);
+        let rows_removed = clamp(
+            update.rows_removed + update.rows_changed,
+            rows_addressable);
+        let rows_added = clamp(
+            update.rows_added + update.rows_changed,
+            rows_addressable);
 
         self.items_changed(
             position as u32,
