@@ -852,7 +852,12 @@ impl ItemSource<TrafficItem> for Capture {
         let start_offset = start_item_id - transfer.ep_first_item_id;
         let end_offset = end_item_id - transfer.ep_first_item_id;
         let start_count = ep_traf.progress_index.get(start_offset)?;
-        let end_count = ep_traf.progress_index.get(end_offset)?;
+        let end_count =
+            if end_offset >= ep_traf.progress_index.len() {
+                ep_traf.transaction_ids.len()
+            } else {
+                ep_traf.progress_index.get(end_offset)?
+            };
         Ok(end_count - start_count)
     }
 
@@ -902,6 +907,18 @@ impl ItemSource<TrafficItem> for Capture {
 
         // Collect data on the expanded transfers.
         let mut transfers = self.transfers(expanded)?;
+
+        // If there are no expanded transfers, shortcut to item lookup.
+        if transfers.is_empty() {
+            let item_index = region.start + index;
+            return if item_index < region.end {
+                Ok(TopLevelItem(item_index, self.item(&None, item_index)?))
+            } else {
+                Err(IndexError(format!(
+                    "With nothing expanded, index {} is outside region {:?}",
+                    item_index, region)))
+            }
+        }
 
         // First, find the right span: the space between two contiguous items
         // in which this transaction is to be found.
