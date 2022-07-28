@@ -413,19 +413,18 @@ where Item: Copy + Debug + 'static,
                 let mut expanded = parent_expanded.clone();
                 expanded.push(node_ref.clone());
                 let range = start..end;
-                let limit = parent.offset + parent.length - relative_position;
-                let added_after =
-                    self.count_rows_to(
-                        parent_expanded, parent_range, node_ref, limit)?;
+                let rows_changed = parent.length - relative_position;
+                let rows_added = self.count_rows_to(
+                    parent_expanded, parent_range, node_ref, rows_changed)?;
                 (Region {
                     source: Interleaved(expanded, range),
                     offset: 0,
-                    length: added_after,
+                    length: rows_changed + rows_added,
                 },
                 ModelUpdate {
-                    rows_added: added_after,
+                    rows_added,
                     rows_removed: 0,
-                    rows_changed: parent.length - relative_position,
+                    rows_changed,
                 })
             },
             // A non-interleaved region.
@@ -454,14 +453,17 @@ where Item: Copy + Debug + 'static,
             length: relative_position,
         });
 
-        // Split the parent region if it has rows after this one.
-        self.regions
-            .entry(position)
-            .or_insert_with(|| Region {
-                source: parent.source.clone(),
-                offset: parent.offset + relative_position,
-                length: parent.length - relative_position,
-            });
+        // Split the parent region if it has rows remaining.
+        if relative_position + update.rows_changed < parent.length {
+            self.regions
+                .entry(position)
+                .or_insert_with(|| Region {
+                    source: parent.source.clone(),
+                    offset: parent.offset + relative_position,
+                    length:
+                        parent.length - relative_position - update.rows_changed
+                });
+        }
 
         // Remove all following regions, to iterate over and replace them.
         let mut following_regions = self.regions
