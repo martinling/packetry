@@ -877,19 +877,18 @@ impl ItemSource<TrafficItem> for Capture {
         let count_range = ep_traf.progress_index.target_range(
             span_offset, ep_traf.transaction_ids.len())?;
         let transaction_count = count_range.len();
-        if let TrafficItem::Transaction(_, expected_transaction_id) = child {
+        if let TrafficItem::Transaction(_, transaction_id) = child {
+            let expected = transaction_id.value;
             for index in 0..transaction_count {
                 let ep_transaction_id =
-                    EndpointTransactionId::from_u64(count_range.start + index);
-                let transaction_id =
-                    ep_traf.transaction_ids.get(ep_transaction_id)?;
-                if transaction_id == *expected_transaction_id {
+                    EndpointTransactionId::from_u64(
+                        count_range.start + index);
+                let id = ep_traf.transaction_ids.get(ep_transaction_id)?;
+                if id.value >= expected {
                     return Ok(index)
                 }
             }
-            Err(IndexError(format!(
-                "Child {:?} of {:?} was not found in span {}",
-                child, item, span_index)))
+            Ok(transaction_count)
         } else {
             Err(IndexError(format!(
                 "Child {:?} is not a transaction", child)))

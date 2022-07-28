@@ -14,6 +14,7 @@ use rtrees::rbtree::{RBTree, Augment};
 use thiserror::Error;
 
 use crate::capture::{Capture, CaptureError, ItemSource, SearchResult};
+use crate::id::HasLength;
 use crate::interval::{Interval, IntervalEnd};
 use crate::row_data::GenericRowData;
 
@@ -196,22 +197,6 @@ where Item: 'static
 pub enum Source<Item> {
     Children(ItemRc<Item>),
     Interleaved(Vec<ItemRc<Item>>, Range<u64>),
-}
-
-impl<Item> PartialEq for Source<Item> {
-    fn eq(&self, other: &Source<Item>) -> bool {
-        use Source::*;
-        match (self, other) {
-            (Children(a), Children(b)) => Rc::ptr_eq(a, b),
-            (Interleaved(a_exp, a_rng), Interleaved(b_exp, b_rng)) =>
-                a_rng == b_rng &&
-                a_exp.len() == b_exp.len() &&
-                a_exp.iter()
-                    .zip(b_exp.iter())
-                    .all(|(a, b)| Rc::ptr_eq(a, b)),
-            (..) => false
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -413,9 +398,10 @@ where Item: Copy + Debug + 'static,
                 let mut expanded = parent_expanded.clone();
                 expanded.push(node_ref.clone());
                 let range = start..end;
-                let rows_changed = parent.length - relative_position;
+                let rows_changed = range.len() - 1 +
+                    self.count_within(parent_expanded, &range)?;
                 let rows_added = self.count_rows_to(
-                    parent_expanded, parent_range, node_ref, rows_changed)?;
+                    parent_expanded, &range, node_ref, rows_changed)?;
                 (Region {
                     source: Interleaved(expanded, range),
                     offset: 0,
@@ -553,7 +539,7 @@ where Item: Copy + Debug + 'static,
 
         // Remove all following regions, to iterate over and replace them.
         let mut following_regions = self.regions
-            .split_off(&position)
+            .split_off(&(position + 1))
             .into_iter();
 
         // For an interleaved source, update all regions that it overlapped.
@@ -589,15 +575,37 @@ where Item: Copy + Debug + 'static,
         // Merge the preceding and following regions if they have the
         // same source.
         if let Some(next_region) = self.regions.get(&position) {
-            if parent.source == next_region.source {
-                let next_length = next_region.length;
-                let parent = self.regions
-                    .get_mut(&parent_start)
-                    .ok_or_else(||
-                        InternalError(String::from(
-                            "Invalid parent start")))?;
-                parent.length += next_length;
-                self.regions.remove(&position);
+            match (&parent.source, &next_region.source) {
+                (Interleaved(a_exp, a_range), Interleaved(b_exp, b_range))
+                    if a_exp.len() == b_exp.len() &&
+                        a_exp.iter()
+                            .zip(b_exp.iter())
+                            .all(|(a, b)| Rc::ptr_eq(a, b)) =>
+                {
+                    let next_length = next_region.length;
+                    let new_range = a_range.start..b_range.end;
+                    let parent = self.regions
+                        .get_mut(&parent_start)
+                        .ok_or_else(||
+                            InternalError(String::from(
+                                "Invalid parent start")))?;
+                    parent.length += next_length;
+                    parent.source = Interleaved(a_exp.clone(), new_range);
+                    self.regions.remove(&position);
+                },
+                (Children(a_ref), Children(b_ref))
+                    if Rc::ptr_eq(&a_ref, &b_ref) =>
+                {
+                    let next_length = next_region.length;
+                    let parent = self.regions
+                        .get_mut(&parent_start)
+                        .ok_or_else(||
+                            InternalError(String::from(
+                                "Invalid parent start")))?;
+                    parent.length += next_length;
+                    self.regions.remove(&position);
+                },
+                (..) => {},
             }
         }
 
