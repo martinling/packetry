@@ -391,10 +391,10 @@ where Item: Copy + Debug + 'static,
             _ => None
         };
 
-        // Construct new region and initial model update.
+        // Construct new parent source, new region and initial model update.
         let (region, mut update) = match (&parent.source, end) {
             // New interleaved region expanded from within an existing one.
-            (Interleaved(parent_expanded, parent_range), Some(end)) => {
+            (Interleaved(parent_expanded, _), Some(end)) => {
                 let mut expanded = parent_expanded.clone();
                 expanded.push(node_ref.clone());
                 let range = start..end;
@@ -434,7 +434,14 @@ where Item: Copy + Debug + 'static,
 
         // Reduce the length of the parent region.
         self.regions.insert(parent_start, Region {
-            source: parent.source.clone(),
+            source: match (&parent.source, &region.source) {
+                (Interleaved(expanded, parent_range),
+                 Interleaved(_, range)) =>
+                    Interleaved(
+                        expanded.clone(),
+                        parent_range.start..(range.start + 1)),
+                (..) => parent.source.clone(),
+            },
             offset: parent.offset,
             length: relative_position,
         });
@@ -444,8 +451,18 @@ where Item: Copy + Debug + 'static,
             self.regions
                 .entry(position)
                 .or_insert_with(|| Region {
-                    source: parent.source.clone(),
-                    offset: parent.offset + relative_position,
+                    source: match (&parent.source, &region.source) {
+                        (Interleaved(expanded, parent_range),
+                         Interleaved(_, range)) =>
+                            Interleaved(
+                                expanded.clone(),
+                                range.end..parent_range.end),
+                        (..) => parent.source.clone()
+                    },
+                    offset: match &region.source {
+                        Children(_) => parent.offset + relative_position,
+                        Interleaved(..) => 0
+                    },
                     length:
                         parent.length - relative_position - update.rows_changed
                 });
@@ -642,7 +659,8 @@ where Item: Copy + Debug + 'static,
             // Count rows added before and after its offset.
             let (added_before_offset, added_after_offset) =
                 self.count_rows(expanded, range, node_ref,
-                                region.offset, region.length)?;
+                                region.offset,
+                                region.offset + region.length)?;
             // Replace with a new region.
             self.regions.insert(start + update.rows_added, Region {
                 source: Interleaved(more_expanded, range.clone()),
@@ -715,7 +733,8 @@ where Item: Copy + Debug + 'static,
         // Count rows added before and after its offset.
         let (_, removed_after_offset) =
             self.count_rows(expanded, range, node_ref,
-                            region.offset, region.length)?;
+                            region.offset,
+                            region.offset + region.length)?;
 
         // Replace with a new region if needed.
         if removed_after_offset < region.length {
