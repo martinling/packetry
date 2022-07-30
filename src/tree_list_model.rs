@@ -10,6 +10,7 @@ use std::ops::{DerefMut, Range};
 
 use gtk::prelude::{IsA, Cast};
 use gtk::glib::Object;
+use itertools::Itertools;
 use rtrees::rbtree::{RBTree, Augment};
 use thiserror::Error;
 
@@ -592,61 +593,41 @@ where Item: Copy + Debug + 'static,
         }
 
         // Merge adjacent regions with the same source.
-        for start_a in self.regions
-            .keys()
-            .copied()
-            .collect::<Vec<u64>>()
-        {
-            'a: while let Some(region_a) = self.regions
-                .get(&start_a)
-                .map(Clone::clone)
-            {
-                for (start_b, region_b) in
-                    self.regions
-                        .clone()
-                        .range((start_a + 1)..)
-                {
-                    match (&region_a.source, &region_b.source) {
-                        (Interleaved(exp_a, range_a),
-                         Interleaved(exp_b, range_b))
-                            if exp_a.len() == exp_b.len() &&
-                                exp_a.iter()
-                                    .zip(exp_b.iter())
-                                    .all(|(a, b)| Rc::ptr_eq(a, b)) =>
-                        {
-                            let length = region_a.length + region_b.length;
-                            let range = range_a.start..range_b.end;
-                            let region_a =
-                                self.regions.get_mut(&start_a).unwrap();
-                            region_a.length = length;
-                            region_a.source = Interleaved(
-                                exp_a.clone(),
-                                range
-                            );
-                            self.regions.remove(&start_b);
-                            continue 'a;
-                        },
-                        (Children(a_ref), Children(b_ref))
-                            if Rc::ptr_eq(&a_ref, &b_ref) =>
-                        {
-                            let length = region_a.length + region_b.length;
-                            let region_a =
-                                self.regions.get_mut(&start_a).unwrap();
-                            region_a.length = length;
-                            self.regions.remove(&start_b);
-                            continue 'a;
-                        },
-                        (..) => {},
-                    }
-                    println!();
-                    println!("Region map after merge step:");
-                    for (start, region) in self.regions.iter() {
-                        println!("{}: {:?}", start, region);
-                    }
+        self.regions = self.regions
+            .split_off(&0)
+            .into_iter()
+            .coalesce(|(start_a, region_a), (start_b, region_b)|
+                match (&region_a.source, &region_b.source) {
+                    (Interleaved(exp_a, range_a),
+                     Interleaved(exp_b, range_b))
+                        if exp_a.len() == exp_b.len() &&
+                            exp_a.iter()
+                                .zip(exp_b.iter())
+                                .all(|(a, b)| Rc::ptr_eq(a, b)) => Ok((
+                            start_a,
+                            Region {
+                                source: Interleaved(
+                                    exp_a.clone(),
+                                    range_a.start..range_b.end),
+                                offset: region_a.offset,
+                                length: region_a.length + region_b.length,
+                            }
+                        )
+                    ),
+                    (Children(a_ref), Children(b_ref))
+                        if Rc::ptr_eq(&a_ref, &b_ref) => Ok((
+                            start_a,
+                            Region {
+                                source: region_a.source,
+                                offset: region_a.offset,
+                                length: region_a.length + region_b.length,
+                            }
+                        )
+                    ),
+                    (..) => Err(((start_a, region_a), (start_b, region_b)))
                 }
-                break;
-            }
-        }
+            )
+            .collect();
 
         println!();
         println!("Region map after merge:");
