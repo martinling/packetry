@@ -315,7 +315,6 @@ where Item: Copy + Debug + 'static,
                      offset: u64)
         -> Result<u64, ModelError>
     {
-        use IntervalEnd::*;
         use SearchResult::*;
         let node = node_ref.borrow();
         let item_index = node.interval.start;
@@ -323,19 +322,12 @@ where Item: Copy + Debug + 'static,
         let mut expanded = self.adapt_expanded(expanded);
         let mut cap = self.capture.lock().or(Err(LockError))?;
         let search_result = cap.find_child(&mut expanded, range, offset);
-        let start = node.interval.start;
-        let end = match node.interval.end {
-            Incomplete => self.item_count,
-            Complete(end) if end > start => end,
-            _ => start,
-        };
-        let item_range = start..end;
         Ok(match search_result {
             Ok(NextLevelItem(span_index, .., child)) => {
-                cap.count_within(item_index, item, &item_range)? +
+                cap.count_within(item_index, item, range)? +
                 cap.count_before(item_index, item, span_index, &child)?
             },
-            _ => cap.count_within(item_index, item, &item_range)?
+            _ => cap.count_within(item_index, item, range)?
         })
     }
 
@@ -391,7 +383,7 @@ where Item: Copy + Debug + 'static,
             _ => None
         };
 
-        // Construct new parent source, new region and initial model update.
+        // Construct new region and initial model update.
         let (region, mut update) = match (&parent.source, end) {
             // New interleaved region expanded from within an existing one.
             (Interleaved(parent_expanded, _), Some(end)) => {
@@ -447,25 +439,25 @@ where Item: Copy + Debug + 'static,
         });
 
         // Split the parent region if it has rows remaining.
-        if relative_position + update.rows_changed < parent.length {
-            self.regions
-                .entry(position)
-                .or_insert_with(|| Region {
-                    source: match (&parent.source, &region.source) {
-                        (Interleaved(expanded, parent_range),
-                         Interleaved(_, range)) =>
-                            Interleaved(
-                                expanded.clone(),
-                                range.end..parent_range.end),
-                        (..) => parent.source.clone()
-                    },
-                    offset: match &region.source {
-                        Children(_) => parent.offset + relative_position,
-                        Interleaved(..) => 0
-                    },
-                    length:
-                        parent.length - relative_position - update.rows_changed
-                });
+        if relative_position + update.rows_changed < parent.length &&
+            !self.regions.contains_key(&position)
+        {
+            self.regions.insert(position + update.rows_changed, Region {
+                source: match (&parent.source, &region.source) {
+                    (Interleaved(expanded, parent_range),
+                     Interleaved(_, range)) =>
+                        Interleaved(
+                            expanded.clone(),
+                            range.end..parent_range.end),
+                    (..) => parent.source.clone()
+                },
+                offset: match &region.source {
+                    Children(_) => parent.offset + relative_position,
+                    Interleaved(..) => 0
+                },
+                length:
+                    parent.length - relative_position - update.rows_changed
+            });
         }
 
         // Remove all following regions, to iterate over and replace them.
@@ -513,9 +505,7 @@ where Item: Copy + Debug + 'static,
 
     pub fn delete_region(&mut self,
                          position: u64,
-                         node_ref: &ItemRc<Item>,
-                         parent_start: u64,
-                         parent: &Region<Item>)
+                         node_ref: &ItemRc<Item>)
         -> Result<ModelUpdate, ModelError>
     {
         use Source::*;
@@ -554,6 +544,12 @@ where Item: Copy + Debug + 'static,
             }
         };
 
+        println!();
+        println!("Region map after delete/replace:");
+        for (start, region) in self.regions.iter() {
+            println!("{}: {:?}", start, region);
+        }
+
         // Remove all following regions, to iterate over and replace them.
         let mut following_regions = self.regions
             .split_off(&(position + 1))
@@ -589,41 +585,73 @@ where Item: Copy + Debug + 'static,
             self.regions.insert(start - update.rows_removed, region);
         }
 
-        // Merge the preceding and following regions if they have the
-        // same source.
-        if let Some(next_region) = self.regions.get(&position) {
-            match (&parent.source, &next_region.source) {
-                (Interleaved(a_exp, a_range), Interleaved(b_exp, b_range))
-                    if a_exp.len() == b_exp.len() &&
-                        a_exp.iter()
-                            .zip(b_exp.iter())
-                            .all(|(a, b)| Rc::ptr_eq(a, b)) =>
+        println!();
+        println!("Region map after shift up:");
+        for (start, region) in self.regions.iter() {
+            println!("{}: {:?}", start, region);
+        }
+
+        // Merge adjacent regions with the same source.
+        for start_a in self.regions
+            .keys()
+            .copied()
+            .collect::<Vec<u64>>()
+        {
+            'a: while let Some(region_a) = self.regions
+                .get(&start_a)
+                .map(Clone::clone)
+            {
+                for (start_b, region_b) in
+                    self.regions
+                        .clone()
+                        .range((start_a + 1)..)
                 {
-                    let next_length = next_region.length;
-                    let new_range = a_range.start..b_range.end;
-                    let parent = self.regions
-                        .get_mut(&parent_start)
-                        .ok_or_else(||
-                            InternalError(String::from(
-                                "Invalid parent start")))?;
-                    parent.length += next_length;
-                    parent.source = Interleaved(a_exp.clone(), new_range);
-                    self.regions.remove(&position);
-                },
-                (Children(a_ref), Children(b_ref))
-                    if Rc::ptr_eq(&a_ref, &b_ref) =>
-                {
-                    let next_length = next_region.length;
-                    let parent = self.regions
-                        .get_mut(&parent_start)
-                        .ok_or_else(||
-                            InternalError(String::from(
-                                "Invalid parent start")))?;
-                    parent.length += next_length;
-                    self.regions.remove(&position);
-                },
-                (..) => {},
+                    match (&region_a.source, &region_b.source) {
+                        (Interleaved(exp_a, range_a),
+                         Interleaved(exp_b, range_b))
+                            if exp_a.len() == exp_b.len() &&
+                                exp_a.iter()
+                                    .zip(exp_b.iter())
+                                    .all(|(a, b)| Rc::ptr_eq(a, b)) =>
+                        {
+                            let length = region_a.length + region_b.length;
+                            let range = range_a.start..range_b.end;
+                            let region_a =
+                                self.regions.get_mut(&start_a).unwrap();
+                            region_a.length = length;
+                            region_a.source = Interleaved(
+                                exp_a.clone(),
+                                range
+                            );
+                            self.regions.remove(&start_b);
+                            continue 'a;
+                        },
+                        (Children(a_ref), Children(b_ref))
+                            if Rc::ptr_eq(&a_ref, &b_ref) =>
+                        {
+                            let length = region_a.length + region_b.length;
+                            let region_a =
+                                self.regions.get_mut(&start_a).unwrap();
+                            region_a.length = length;
+                            self.regions.remove(&start_b);
+                            continue 'a;
+                        },
+                        (..) => {},
+                    }
+                    println!();
+                    println!("Region map after merge step:");
+                    for (start, region) in self.regions.iter() {
+                        println!("{}: {:?}", start, region);
+                    }
+                }
+                break;
             }
+        }
+
+        println!();
+        println!("Region map after merge:");
+        for (start, region) in self.regions.iter() {
+            println!("{}: {:?}", start, region);
         }
 
         // Update total row count.
@@ -798,8 +826,7 @@ where Item: Copy + Debug + 'static,
             }
 
             // Delete the region associated with this node.
-            let mut update =
-                self.delete_region(position, node_ref, start, &region)?;
+            let mut update = self.delete_region(position, node_ref)?;
 
             // Include results of collapsing children in rows removed.
             update.rows_removed += child_rows_removed;
