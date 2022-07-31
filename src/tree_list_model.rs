@@ -511,6 +511,7 @@ where Item: Copy + Debug + 'static,
         -> Result<ModelUpdate, ModelError>
     {
         use Source::*;
+        use IntervalEnd::*;
 
         // Remove the region starting at this position.
         let region = self.regions.remove(&position).ok_or_else(||
@@ -523,19 +524,20 @@ where Item: Copy + Debug + 'static,
             Interleaved(expanded, range) => {
                 let mut less_expanded = expanded.clone();
                 less_expanded.retain(|rc| !Rc::ptr_eq(rc, node_ref));
-                let removed_within =
+                let rows_removed =
                     self.count_rows_to(
                         expanded, range, node_ref, region.length)?;
+                let rows_changed = region.length - rows_removed;
                 // Replace this region with a new version.
                 self.regions.insert(position, Region {
                     source: Interleaved(less_expanded, range.clone()),
                     offset: 0,
-                    length: region.length - removed_within,
+                    length: rows_changed,
                 });
                 ModelUpdate {
                     rows_added: 0,
-                    rows_removed: removed_within,
-                    rows_changed: region.length - removed_within,
+                    rows_removed,
+                    rows_changed,
                 }
             },
             // Non-interleaved region is just removed.
@@ -558,7 +560,16 @@ where Item: Copy + Debug + 'static,
             .into_iter();
 
         // For an interleaved source, update all regions that it overlapped.
-        if let Interleaved(_, removed_range) = &region.source {
+        if let Interleaved(..) = &region.source {
+            let removed_range = {
+                let node = node_ref.borrow();
+                let start = node.interval.start;
+                let end = match node.interval.end {
+                    Incomplete => self.item_count,
+                    Complete(end) => end,
+                };
+                start..end
+            };
             for (start, region) in following_regions.by_ref() {
                 match &region.source {
                     Interleaved(expanded, range) => {
@@ -566,7 +577,7 @@ where Item: Copy + Debug + 'static,
                         if !self.unoverlap_region(
                             start, &region,
                             expanded, range,
-                            node_ref, removed_range,
+                            node_ref, &removed_range,
                             &mut update)?
                         {
                             // No further overlapping regions.
@@ -580,6 +591,12 @@ where Item: Copy + Debug + 'static,
                     }
                 }
             }
+        }
+
+        println!();
+        println!("Region map after unoverlap:");
+        for (start, region) in self.regions.iter() {
+            println!("{}: {:?}", start, region);
         }
 
         // Shift all following regions up by the removed rows.
