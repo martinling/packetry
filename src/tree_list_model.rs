@@ -325,7 +325,8 @@ where Item: Copy + Debug + 'static,
         let search_result = cap.find_child(&mut expanded, range, offset);
         Ok(match search_result {
             Ok(NextLevelItem(span_index, .., child)) => {
-                cap.count_within(item_index, item, range)? +
+                let up_to_span = range.start..span_index;
+                cap.count_within(item_index, item, &up_to_span)? +
                 cap.count_before(item_index, item, span_index, &child)?
             },
             _ => cap.count_within(item_index, item, range)?
