@@ -229,7 +229,7 @@ where Item: Clone + Debug
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct ModelUpdate {
     pub rows_added: u64,
     pub rows_removed: u64,
@@ -388,14 +388,14 @@ where Item: Copy + Debug + 'static,
         // Construct new region and initial model update.
         let (region, mut update) = match (&parent.source, end) {
             // New interleaved region expanded from within an existing one.
-            (Interleaved(parent_expanded, _), Some(end)) => {
+            (Interleaved(parent_expanded, parent_range), Some(end)) => {
                 let mut expanded = parent_expanded.clone();
                 expanded.push(node_ref.clone());
-                let range = start..end;
-                let rows_changed = range.len() - 1 +
+                let range = start..min(end, parent_range.end);
+                let rows_changed = range.len() +
                     self.count_within(parent_expanded, &range)?;
-                let rows_added = self.count_rows_to(
-                    parent_expanded, &range, node_ref, rows_changed)?;
+                let rows_added =
+                    self.count_within(&[node_ref.clone()], &range)?;
                 (Region {
                     source: Interleaved(expanded, range),
                     offset: 0,
@@ -488,6 +488,7 @@ where Item: Copy + Debug + 'static,
                     }
                     Children(_) => {
                         // Region is self-contained, so just shift it down.
+                        update.rows_changed += region.length;
                         self.regions.insert(start + update.rows_added, region);
                     }
                 }
@@ -586,6 +587,7 @@ where Item: Copy + Debug + 'static,
                     }
                     Children(_) => {
                         // Region is self-contained, so just shift it up.
+                        update.rows_changed += region.length;
                         self.regions.insert(
                             start - update.rows_removed, region);
                     }
@@ -721,14 +723,14 @@ where Item: Copy + Debug + 'static,
                     offset: region.offset + added_before_offset,
                     length: split_offset + added_after_offset,
                 });
-                update.rows_changed += region.length;
-                update.rows_added += added_after_offset;
                 // Insert new region for the non-overlapping part.
                 self.regions.insert(start + update.rows_added, Region {
                     source: Interleaved(expanded.to_vec(), second_range),
                     offset: 0,
                     length: region.length - split_offset,
                 });
+                update.rows_changed += region.length;
+                update.rows_added += added_after_offset;
                 Ok(true)
             }
         }
@@ -756,24 +758,25 @@ where Item: Copy + Debug + 'static,
         let mut less_expanded = expanded.to_vec();
         less_expanded.retain(|rc| !Rc::ptr_eq(rc, node_ref));
 
-        // The removed interval must overlap this whole region.
-        // Count rows added before and after its offset.
-        let (_, removed_after_offset) =
+        // Count rows removed.
+        let (_, rows_removed) =
             self.count_rows(expanded, range, node_ref,
                             region.offset,
                             region.offset + region.length)?;
 
         // Replace with a new region if needed.
-        if removed_after_offset < region.length {
+        if region.length > rows_removed {
             self.regions.insert(start - update.rows_removed, Region {
                 source: Interleaved(less_expanded, range.clone()),
                 offset: region.offset,
-                length: region.length - removed_after_offset,
+                length: region.length - rows_removed,
             });
+        } else {
+            println!("Discarding region {:?}", region);
         }
 
-        update.rows_changed += region.length;
-        update.rows_removed += removed_after_offset;
+        update.rows_changed += region.length - rows_removed;
+        update.rows_removed += rows_removed;
         Ok(true)
     }
 
@@ -837,6 +840,8 @@ where Item: Copy + Debug + 'static,
         let parent_ref = node.parent.upgrade().ok_or(ParentDropped)?;
         parent_ref.borrow_mut().set_expanded(node_ref, expanded);
 
+        println!();
+        println!("Update: {:?}", update);
         println!();
         println!("Region map:");
         for (start, region) in self.regions.iter() {
