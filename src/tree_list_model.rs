@@ -773,7 +773,7 @@ where Item: Copy + Debug + 'static,
                         _ => Region {
                             source: Root(),
                             offset: second_range.start,
-                            length: second_range.len() - 1,
+                            length: second_range.len(),
                         },
                     }
                 );
@@ -831,8 +831,6 @@ where Item: Copy + Debug + 'static,
             });
             update.rows_removed += self.count_within(expanded, range)?;
             update.rows_changed += range.len();
-            // There are no more overlapping regions.
-            Ok(false)
         } else {
             // Replace with a new interleaved region.
             let (_, rows_removed) =
@@ -846,9 +844,8 @@ where Item: Copy + Debug + 'static,
             });
             update.rows_removed += rows_removed;
             update.rows_changed += region.length - rows_removed;
-            // There are still more overlapping regions.
-            Ok(true)
         }
+        Ok(true)
     }
 
     pub fn set_expanded(&mut self,
