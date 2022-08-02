@@ -458,9 +458,13 @@ where Item: Copy + Debug + 'static,
                 Err(InternalError(String::from(
                     "Unable to construct region")))
         };
+        println!();
+        println!("Inserting: {:?}", region);
+        println!("           {} added, {} changed",
+                 update.rows_added, update.rows_changed);
 
         // Reduce the length of the parent region.
-        self.regions.insert(parent_start, Region {
+        let new_parent = Region {
             source: match (&parent.source, &region.source) {
                 (Interleaved(expanded, parent_range),
                  Interleaved(_, range)) =>
@@ -471,7 +475,9 @@ where Item: Copy + Debug + 'static,
             },
             offset: parent.offset,
             length: relative_position,
-        });
+        };
+        println!("Reducing parent to: {:?}", new_parent);
+        self.regions.insert(parent_start, new_parent);
 
         // Split the parent region if it has rows remaining.
         if relative_position + update.rows_changed < parent.length &&
@@ -495,6 +501,7 @@ where Item: Copy + Debug + 'static,
                     - relative_position
                     - update.rows_changed,
             };
+            println!("Splitting parent to: {:?}", new_region);
             self.regions.insert(position + update.rows_changed, new_region);
         }
 
@@ -543,6 +550,9 @@ where Item: Copy + Debug + 'static,
             InternalError(format!(
                 "No region to delete at position {}", position)))?;
 
+        println!();
+        println!("Removed: {:?}", region);
+
         // Calculate model update and replace if necessary.
         let mut update = match &region.source {
             // Interleaved region, must be replaced with a root region.
@@ -552,11 +562,13 @@ where Item: Copy + Debug + 'static,
                                     region.offset,
                                     region.offset + region.length)?;
                 let rows_changed = range.len() - 1;
-                self.regions.insert(position, Region {
+                let new_region = Region {
                     source: Root(),
                     offset: range.start + 1,
                     length: rows_changed,
-                });
+                };
+                println!("    for: {:?}", new_region);
+                self.regions.insert(position, new_region);
                 ModelUpdate {
                     rows_added: 0,
                     rows_removed,
@@ -572,11 +584,13 @@ where Item: Copy + Debug + 'static,
                 let rows_changed = region.length - rows_removed;
                 let mut less_expanded = expanded.clone();
                 less_expanded.retain(|rc| !Rc::ptr_eq(rc, node_ref));
-                self.regions.insert(position, Region {
+                let new_region = Region {
                     source: Interleaved(less_expanded, range.clone()),
                     offset: 0,
                     length: rows_changed,
-                });
+                };
+                println!("    for: {:?}", new_region);
+                self.regions.insert(position, new_region);
                 ModelUpdate {
                     rows_added: 0,
                     rows_removed,
@@ -593,6 +607,9 @@ where Item: Copy + Debug + 'static,
             Root() => return Err(InternalError(String::from(
                 "Unable to collapse root region")))
         };
+
+        println!("         {} removed, {} changed",
+                 update.rows_removed, update.rows_changed);
 
         // Remove all following regions, to iterate over and replace them.
         let mut following_regions = self.regions
