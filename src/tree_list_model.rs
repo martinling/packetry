@@ -554,7 +554,7 @@ where Item: Copy + Debug + 'static,
                 let rows_changed = range.len() - 1;
                 self.regions.insert(position, Region {
                     source: Root(),
-                    offset: range.start,
+                    offset: range.start + 1,
                     length: rows_changed,
                 });
                 ModelUpdate {
@@ -737,22 +737,21 @@ where Item: Copy + Debug + 'static,
                 // Replace with a new region.
                 let mut less_expanded = expanded.to_vec();
                 less_expanded.retain(|rc| !Rc::ptr_eq(rc, node_ref));
-                let (_, rows_removed) =
-                    self.count_rows(expanded, range, node_ref,
-                                    region.offset,
-                                    region.offset + region.length)?;
-                let rows_changed = region.length - rows_removed;
                 let new_region = if less_expanded.is_empty() {
                     Region {
                         source: Root(),
                         offset: range.start,
-                        length: rows_changed,
+                        length: range.len(),
                     }
                 } else {
+                    let (removed_before_offset, removed_after_offset) =
+                        self.count_rows(expanded, range, node_ref,
+                                        region.offset,
+                                        region.offset + region.length)?;
                     Region {
                         source: Interleaved(less_expanded, range.clone()),
-                        offset: region.offset,
-                        length: rows_changed,
+                        offset: region.offset - removed_before_offset,
+                        length: region.length - removed_after_offset,
                     }
                 };
                 (new_region, true)
@@ -795,7 +794,9 @@ where Item: Copy + Debug + 'static,
             };
 
             println!("     with: {:?}", new_region);
-            self.regions.insert(start + update.rows_added, new_region);
+            let new_position =
+                start + update.rows_added - update.rows_removed;
+            self.regions.insert(new_position, new_region);
 
             if modify_update {
                 update.rows_added += new_update.rows_added;
