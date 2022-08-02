@@ -906,18 +906,7 @@ impl ItemSource<TrafficItem> for Capture {
 
         // Collect data on the expanded transfers.
         let mut transfers = self.transfers(expanded)?;
-
-        // If there are no expanded transfers, shortcut to item lookup.
-        if transfers.is_empty() {
-            let item_index = region.start + index;
-            return if item_index < region.end {
-                Ok(TopLevelItem(item_index, self.item(&None, item_index)?))
-            } else {
-                Err(IndexError(format!(
-                    "With nothing expanded, index {} is outside region {:?}",
-                    item_index, region)))
-            }
-        }
+        assert!(!transfers.is_empty());
 
         // First, find the right span: the space between two contiguous items
         // in which this transaction is to be found.
