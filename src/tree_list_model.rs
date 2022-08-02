@@ -272,11 +272,6 @@ where Item: Copy + Debug + 'static,
             offset: 0,
             length: item_count,
         });
-        println!();
-        println!("Region map:");
-        for (start, region) in model.regions.iter() {
-            println!("{}: {:?}", start, region);
-        }
         Ok(model)
     }
 
@@ -411,12 +406,11 @@ where Item: Copy + Debug + 'static,
         let (region, mut update) = match (&parent.source, end) {
             // New interleaved region expanded from a root region.
             (Root(), Some(end)) => {
-                let parent_end = parent.offset + parent.length;
-                let parent_range = parent.offset..parent_end;
-                let range = start..min(end, parent_range.end);
                 let expanded = vec![node_ref.clone()];
-                let rows_added = self.count_within(&expanded, &range)?;
+                let parent_end = parent.offset + parent.length;
+                let range = start..min(end, parent_end);
                 let rows_changed = range.len() - 1;
+                let rows_added = self.count_within(&expanded, &range)?;
                 (Region {
                     source: Interleaved(expanded, range),
                     offset: 0,
@@ -430,13 +424,11 @@ where Item: Copy + Debug + 'static,
             },
             // New interleaved region expanded from within an existing one.
             (Interleaved(parent_expanded, parent_range), Some(end)) => {
-                let range = start..min(end, parent_range.end);
-                let rows_changed = range.len() - 1 +
-                    self.count_within(parent_expanded, &range)?;
-                let rows_added =
-                    self.count_within(&[node_ref.clone()], &range)?;
                 let mut expanded = parent_expanded.clone();
                 expanded.push(node_ref.clone());
+                let range = start..min(end, parent_range.end);
+                let rows_changed = range.len() - 1;
+                let rows_added = self.count_within(&expanded, &range)?;
                 (Region {
                     source: Interleaved(expanded, range),
                     offset: 0,
@@ -474,7 +466,7 @@ where Item: Copy + Debug + 'static,
                  Interleaved(_, range)) =>
                     Interleaved(
                         expanded.clone(),
-                        parent_range.start..(range.start + 1)),
+                        parent_range.start..range.start),
                 (..) => parent.source.clone(),
             },
             offset: parent.offset,
@@ -485,7 +477,7 @@ where Item: Copy + Debug + 'static,
         if relative_position + update.rows_changed < parent.length &&
             !self.regions.contains_key(&position)
         {
-            self.regions.insert(position + update.rows_changed, Region {
+            let new_region = Region {
                 source: match (&parent.source, &region.source) {
                     (Interleaved(expanded, parent_range),
                      Interleaved(_, range)) =>
@@ -496,11 +488,14 @@ where Item: Copy + Debug + 'static,
                 },
                 offset: match (&parent.source, &region.source) {
                     (Interleaved(..), Interleaved(..)) => 0,
+                    (Root(), Interleaved(_, range)) => range.end,
                     _ => parent.offset + relative_position,
                 },
-                length:
-                    parent.length - relative_position - update.rows_changed
-            });
+                length: parent.length
+                    - relative_position
+                    - update.rows_changed,
+            };
+            self.regions.insert(position + update.rows_changed, new_region);
         }
 
         // Remove all following regions, to iterate over and replace them.
@@ -557,7 +552,7 @@ where Item: Copy + Debug + 'static,
                 let rows_changed = range.len() - 1;
                 self.regions.insert(position, Region {
                     source: Root(),
-                    offset: range.start + 1,
+                    offset: range.start,
                     length: rows_changed,
                 });
                 ModelUpdate {
@@ -697,7 +692,7 @@ where Item: Copy + Debug + 'static,
                 let first_range = range.start..node_range.end;
                 let second_range = node_range.end..range.end;
                 // Work out the row at which this region splits.
-                let split_offset = first_range.len() +
+                let split_offset = first_range.len() - 1 +
                     self.count_within(expanded, &first_range)?;
                 if region.offset >= split_offset {
                     // This region begins after the split, so it doesn't
@@ -787,10 +782,6 @@ where Item: Copy + Debug + 'static,
                         length: rows_changed,
                     }
                 };
-                println!("Replacing: {}: {:?}",
-                         new_position, new_region);
-                println!("Removed {} rows, changed {} rows",
-                         rows_removed, rows_changed);
                 self.regions.insert(new_position, new_region);
                 Ok(true)
             }
