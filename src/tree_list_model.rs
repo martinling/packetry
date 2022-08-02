@@ -391,8 +391,10 @@ where Item: Copy + Debug + 'static,
                 let mut expanded = parent_expanded.clone();
                 expanded.push(node_ref.clone());
                 let range = start..min(end, parent_range.end);
-                let rows_changed = range.len() - 1;
-                let rows_added = self.count_within(&expanded, &range)?;
+                let rows_changed =
+                    self.count_within(parent_expanded, &range)?;
+                let rows_added =
+                    self.count_within(&[node_ref.clone()], &range)?;
                 (Region {
                     source: Interleaved(expanded, range),
                     offset: 0,
