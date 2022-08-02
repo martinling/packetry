@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::cmp::{max, min, Ordering};
+use std::cmp::{min, Ordering};
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::num::TryFromIntError;
@@ -11,7 +11,6 @@ use std::ops::{DerefMut, Range};
 use gtk::prelude::{IsA, Cast};
 use gtk::glib::Object;
 use itertools::Itertools;
-use rtrees::rbtree::{RBTree, Augment};
 use thiserror::Error;
 
 use crate::capture::{Capture, CaptureError, ItemSource, SearchResult};
@@ -52,8 +51,8 @@ pub trait Node<Item> {
 }
 
 pub struct RootNode<Item> {
-    /// Interval tree of expanded top level items.
-    expanded: IntervalTree<Item>,
+    /// Expanded top level items, by index.
+    expanded: BTreeMap<u64, ItemRc<Item>>,
 }
 
 pub struct ItemNode<Item> {
@@ -73,57 +72,22 @@ pub struct ItemNode<Item> {
     expanded: BTreeMap<u64, ItemRc<Item>>,
 }
 
-struct IntervalTree<Item>(RBTree<u64, AugData, ItemRc<Item>>);
-
-#[derive(Copy, Clone)]
-pub struct AugData {
-    last_end: IntervalEnd,
-}
-
-impl<Item> Augment<AugData> for
-    RBTree<u64, AugData, ItemRc<Item>>
-{
-    fn sync_custom_aug(&mut self) {
-        if !self.is_node() {
-            return;
-        }
-        let own_end = self.data_ref().borrow().interval.end;
-        let left = self.left_ref();
-        let right = self.right_ref();
-        let mut aug_data = AugData {
-            last_end: own_end
-        };
-        if left.is_node() {
-            let left = left.aug_data();
-            aug_data.last_end = max(aug_data.last_end, left.last_end);
-        }
-        if right.is_node() {
-            let right = right.aug_data();
-            aug_data.last_end = max(aug_data.last_end, right.last_end);
-        }
-        self.set_aug_data(aug_data);
-    }
-}
-
 impl<Item> Node<Item> for RootNode<Item> {
     fn has_expanded(&self, index: u64) -> bool {
-        self.expanded.0.search(index).is_some()
+        self.expanded.contains_key(&index)
     }
 
     fn get_expanded(&self, index: u64) -> Option<ItemRc<Item>> {
-        self.expanded.0.search(index).map(Rc::clone)
+        self.expanded.get(&index).map(Rc::clone)
     }
 
     fn set_expanded(&mut self, child_rc: &ItemRc<Item>, expanded: bool) {
         let child = child_rc.borrow();
         let start = child.interval.start;
-        let aug_data = AugData {
-            last_end: child.interval.end,
-        };
         if expanded {
-            self.expanded.0.insert(start, aug_data, child_rc.clone());
+            self.expanded.insert(start, child_rc.clone());
         } else {
-            self.expanded.0.delete(start);
+            self.expanded.remove(&start);
         }
     }
 }
@@ -264,7 +228,7 @@ where Item: Copy + Debug + 'static,
             row_count: item_count,
             regions: BTreeMap::new(),
             root: Rc::new(RefCell::new(RootNode {
-                expanded: IntervalTree(RBTree::new()),
+                expanded: BTreeMap::new(),
             })),
         };
         model.regions.insert(0, Region {
