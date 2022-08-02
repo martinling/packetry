@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::cmp::{max, min};
+use std::cmp::{max, min, Ordering};
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::num::TryFromIntError;
@@ -508,6 +508,8 @@ where Item: Copy + Debug + 'static,
 
         // For an interleaved source, update all regions that it overlaps.
         if let Interleaved(..) = &region.source {
+            println!();
+            println!("Updating overlapped regions...");
             for (start, region) in following_regions.by_ref() {
                 // Do whatever is necessary to overlap this region.
                 if !self.overlap_region(start, &region, node_ref, &mut update)?
@@ -599,6 +601,8 @@ where Item: Copy + Debug + 'static,
 
         // For an interleaved source, update all regions that it overlapped.
         if let Interleaved(..) = &region.source {
+            println!();
+            println!("Updating overlapped regions...");
             for (start, region) in following_regions.by_ref() {
                 // Do whatever is necessary to unoverlap this region.
                 if !self.unoverlap_region(start, &region, node_ref, &mut update)?
@@ -632,59 +636,42 @@ where Item: Copy + Debug + 'static,
     {
         use Source::*;
 
-        let new_position = start + update.rows_added;
         let node_range = self.range(node_ref);
 
-        match &region.source {
-            Children(_) => {
+        let (new_regions, overlapping) = match &region.source {
+            Children(_) =>
                 // This region is self-contained, move down and continue.
-                self.regions.insert(new_position, region.clone());
-                update.rows_changed += region.length;
-                Ok(true)
-            }
-            Root() if region.offset >= node_range.end => {
-                // This region does not overlap, just move it down.
-                self.regions.insert(new_position, region.clone());
-                Ok(false)
-            },
-            Interleaved(_, range) if range.start >= node_range.end => {
-                // This region does not overlap, just move it down.
-                self.regions.insert(new_position, region.clone());
-                Ok(false)
-            }
+                (vec![region.clone()], true),
+            Root() if region.offset >= node_range.end =>
+                // This region does not overlap, move down and stop.
+                (vec![region.clone()], false),
+            Interleaved(_, range) if range.start >= node_range.end =>
+                // This region does not overlap, move down and stop.
+                (vec![region.clone()], false),
             Root() => {
                 // Replace with a new interleaved region.
                 let expanded = vec![node_ref.clone()];
                 let range = region.offset..(region.offset + region.length);
-                let rows_changed = region.length;
-                let rows_added = self.count_within(&expanded, &range)?;
-                self.regions.insert(new_position, Region {
+                let added = self.count_within(&expanded, &range)?;
+                (vec![Region {
                     source: Interleaved(expanded, range),
                     offset: 0,
-                    length: rows_added + rows_changed,
-                });
-                update.rows_changed += rows_changed;
-                update.rows_added += rows_added;
-                Ok(true)
+                    length: region.length + added,
+                }], true)
             },
             Interleaved(expanded, range) if range.end <= node_range.end => {
-                // The new interval overlaps this whole region.
-                // Count rows added before and after its offset.
+                // Replace with a new interleaved region.
                 let (added_before_offset, added_after_offset) =
                     self.count_rows(expanded, range, node_ref,
                                     region.offset,
                                     region.offset + region.length)?;
-                // Replace with a new interleaved region.
                 let mut more_expanded = expanded.clone();
                 more_expanded.push(node_ref.clone());
-                self.regions.insert(new_position, Region {
+                (vec![Region {
                     source: Interleaved(more_expanded, range.clone()),
                     offset: region.offset + added_before_offset,
                     length: region.length + added_after_offset,
-                });
-                update.rows_changed += region.length;
-                update.rows_added += added_after_offset;
-                Ok(true)
+                }], true)
             },
             Interleaved(expanded, range) => {
                 // May need to split this region into two, since the new
@@ -696,37 +683,33 @@ where Item: Copy + Debug + 'static,
                     self.count_within(expanded, &first_range)?;
                 if region.offset >= split_offset {
                     // This region begins after the split, so it doesn't
-                    // overlap with the new interval.
-                    self.regions.insert(new_position, region.clone());
-                    Ok(false)
+                    // overlap with the new interval. Move down and stop.
+                    (vec![region.clone()], false)
                 } else {
-                    // We need to split this region into two. Work out how many
-                    // rows are added before and after this region's offset.
+                    // We need to split this region into two.
                     let (added_before_offset, added_after_offset) =
                         self.count_rows(expanded, range, node_ref,
                                         region.offset, split_offset)?;
-                    // Insert new region for the overlapping part.
                     let mut more_expanded = expanded.clone();
                     more_expanded.push(node_ref.clone());
-                    self.regions.insert(new_position, Region {
+                    // New region for the overlapping part.
+                    (vec![Region {
                         source: Interleaved(more_expanded, first_range),
                         offset: region.offset + added_before_offset,
                         length: split_offset + added_after_offset,
-                    });
-                    // Insert new region for the non-overlapping part.
-                    self.regions.insert(new_position + added_after_offset,
-                        Region {
-                            source: Interleaved(expanded.clone(), second_range),
-                            offset: 0,
-                            length: region.length - split_offset,
-                        }
-                    );
-                    update.rows_changed += region.length;
-                    update.rows_added += added_after_offset;
-                    Ok(true)
+                    // New region for the non-overlapping part.
+                    }, Region {
+                        source: Interleaved(expanded.clone(), second_range),
+                        offset: 0,
+                        length: region.length - split_offset,
+                    }], true)
                 }
             }
-        }
+        };
+
+        self.replace_region(update, start, region, new_regions, overlapping);
+
+        Ok(overlapping)
     }
 
     fn unoverlap_region(&mut self,
@@ -738,32 +721,22 @@ where Item: Copy + Debug + 'static,
     {
         use Source::*;
 
-        let new_position = start - update.rows_removed;
         let node_range = self.range(node_ref);
 
-        match &region.source {
-            Children(_) => {
-                // This region is self-contained, move it up and continue.
-                self.regions.insert(new_position, region.clone());
-                update.rows_changed += region.length;
-                Ok(true)
-            },
-            Root() => {
-                // This region does not overlap, so just move it up.
-                self.regions.insert(new_position, region.clone());
-                Ok(false)
-            },
-            Interleaved(_, range) if range.start >= node_range.end => {
-                // This region does not overlap, so just move it up.
-                self.regions.insert(new_position, region.clone());
-                Ok(false)
-            },
+        let (new_region, overlapping) = match &region.source {
+            Children(_) =>
+                // This region is self-contained, move up and continue.
+                (region.clone(), true),
+            Root() =>
+                // This region does not overlap, just move it up.
+                (region.clone(), false),
+            Interleaved(_, range) if range.start >= node_range.end =>
+                // This region does not overlap, just move it up.
+                (region.clone(), false),
             Interleaved(expanded, range) => {
-                // Remove this interval from those expanded in this region.
+                // Replace with a new region.
                 let mut less_expanded = expanded.to_vec();
                 less_expanded.retain(|rc| !Rc::ptr_eq(rc, node_ref));
-
-                // Replace with a new region.
                 let (_, rows_removed) =
                     self.count_rows(expanded, range, node_ref,
                                     region.offset,
@@ -782,8 +755,56 @@ where Item: Copy + Debug + 'static,
                         length: rows_changed,
                     }
                 };
-                self.regions.insert(new_position, new_region);
-                Ok(true)
+                (new_region, true)
+            }
+        };
+
+        let new_regions = vec![new_region];
+        self.replace_region(update, start, region, new_regions, overlapping);
+
+        Ok(overlapping)
+    }
+
+    fn replace_region(&mut self,
+                      update: &mut ModelUpdate,
+                      start: u64,
+                      region: &Region<Item>,
+                      new_regions: Vec<Region<Item>>,
+                      modify_update: bool)
+    {
+        println!("Replacing: {:?}", region);
+
+        for new_region in new_regions {
+            use Ordering::*;
+            let new_update = match new_region.length.cmp(&region.length) {
+                Greater => ModelUpdate {
+                    rows_added: new_region.length - region.length,
+                    rows_removed: 0,
+                    rows_changed: region.length
+                },
+                Less => ModelUpdate {
+                    rows_added: 0,
+                    rows_removed: region.length - new_region.length,
+                    rows_changed: new_region.length
+                },
+                Equal => ModelUpdate {
+                    rows_added: 0,
+                    rows_removed: 0,
+                    rows_changed: region.length
+                },
+            };
+
+            println!("     with: {:?}", new_region);
+            self.regions.insert(start + update.rows_added, new_region);
+
+            if modify_update {
+                update.rows_added += new_update.rows_added;
+                update.rows_removed += new_update.rows_removed;
+                update.rows_changed += new_update.rows_changed;
+                println!("           {} added, {} removed, {} changed",
+                         new_update.rows_added,
+                         new_update.rows_removed,
+                         new_update.rows_changed);
             }
         }
     }
