@@ -373,124 +373,96 @@ where Item: Copy + Debug + 'static,
             Complete(end) if end > start => Some(end),
             _ => None
         };
+        let interleaved = end.is_some();
 
-        // Construct new region and initial model update.
-        let (region, mut update) = match (&parent.source, end) {
+        // Split the parent and create a new region in between.
+        let mut update = match (&parent.source, end) {
+            // A non-interleaved region.
+            (_, None) => {
+                self.split_region(parent_start, parent,
+                    Region {
+                        source: parent.source.clone(),
+                        offset: parent.offset,
+                        length: relative_position,
+                    },
+                    Region {
+                        source: Children(node_ref.clone()),
+                        offset: 0,
+                        length: node.child_count,
+                    },
+                    Region {
+                        source: parent.source.clone(),
+                        offset: relative_position,
+                        length: parent.length - relative_position,
+                    }
+                )
+            },
             // New interleaved region expanded from a root region.
-            (Root(), Some(end)) => {
+            (Root(), Some(interval_end)) => {
                 let expanded = vec![node_ref.clone()];
                 let parent_end = parent.offset + parent.length;
-                let range = start..min(end, parent_end);
-                let rows_changed = range.len() - 1;
-                let rows_added = self.count_within(&expanded, &range)?;
-                (Region {
-                    source: Interleaved(expanded, range),
-                    offset: 0,
-                    length: rows_changed + rows_added,
-                },
-                ModelUpdate {
-                    rows_added,
-                    rows_removed: 0,
-                    rows_changed,
-                })
+                let new_region_end = min(interval_end, parent_end);
+                let range = start..new_region_end;
+                let added = self.count_within(&expanded, &range)?;
+                self.split_region(parent_start, parent,
+                    Region {
+                        source: Root(),
+                        offset: parent.offset,
+                        length: start + 1 - parent.offset,
+                    },
+                    Region {
+                        source: Interleaved(expanded, range),
+                        offset: 0,
+                        length: added,
+                    },
+                    Region {
+                        source: Root(),
+                        offset: new_region_end,
+                        length: parent_end - new_region_end,
+                    }
+                )
             },
             // New interleaved region expanded from within an existing one.
             (Interleaved(parent_expanded, parent_range), Some(end)) => {
+                assert!(parent.offset == 0);
                 let mut expanded = parent_expanded.clone();
                 expanded.push(node_ref.clone());
-                let range = start..min(end, parent_range.end);
-                let rows_changed =
-                    self.count_within(parent_expanded, &range)?;
-                let rows_added =
-                    self.count_within(&[node_ref.clone()], &range)?;
-                (Region {
-                    source: Interleaved(expanded, range),
-                    offset: 0,
-                    length: rows_changed + rows_added,
-                },
-                ModelUpdate {
-                    rows_added,
-                    rows_removed: 0,
-                    rows_changed,
-                })
+                let range_1 = parent_range.start..start;
+                let range_2 = start..min(end, parent_range.end);
+                let range_3 = range_2.end..parent_range.end;
+                let changed = self.count_within(parent_expanded, &range_2)?;
+                let added = self.count_within(&[node_ref.clone()], &range_2)?;
+                self.split_region(parent_start, parent,
+                    Region {
+                        source: Interleaved(parent_expanded.clone(), range_1),
+                        offset: 0,
+                        length: relative_position,
+                    },
+                    Region {
+                        source: Interleaved(expanded, range_2),
+                        offset: 0,
+                        length: changed + added,
+                    },
+                    Region {
+                        source: Interleaved(parent_expanded.clone(), range_3),
+                        offset: 0,
+                        length: parent.length - relative_position - changed,
+                    }
+                )
             },
-            // A non-interleaved region.
-            (_, None) => (
-                Region {
-                    source: Children(node_ref.clone()),
-                    offset: 0,
-                    length: node.child_count,
-                },
-                ModelUpdate {
-                    rows_added: node.child_count,
-                    rows_removed: 0,
-                    rows_changed: 0
-                }
-            ),
             // Other combinations are not supported.
             (..) => return
                 Err(InternalError(String::from(
                     "Unable to construct region")))
         };
-        println!();
-        println!("Inserting: {:?}", region);
-        println!("           {} added, {} changed",
-                 update.rows_added, update.rows_changed);
-
-        // Reduce the length of the parent region.
-        let new_parent = Region {
-            source: match (&parent.source, &region.source) {
-                (Interleaved(expanded, parent_range),
-                 Interleaved(_, range)) =>
-                    Interleaved(
-                        expanded.clone(),
-                        parent_range.start..range.start),
-                (..) => parent.source.clone(),
-            },
-            offset: parent.offset,
-            length: relative_position,
-        };
-        println!("Reducing parent to: {:?}", new_parent);
-        self.regions.insert(parent_start, new_parent);
-
-        // Split the parent region if it has rows remaining.
-        if relative_position + update.rows_changed < parent.length &&
-            !self.regions.contains_key(&position)
-        {
-            let new_region = Region {
-                source: match (&parent.source, &region.source) {
-                    (Interleaved(expanded, parent_range),
-                     Interleaved(_, range)) =>
-                        Interleaved(
-                            expanded.clone(),
-                            range.end..parent_range.end),
-                    (..) => parent.source.clone()
-                },
-                offset: match (&parent.source, &region.source) {
-                    (Interleaved(..), Interleaved(..)) => 0,
-                    (Root(), Interleaved(_, range)) => range.end,
-                    _ => parent.offset + relative_position,
-                },
-                length: parent.length
-                    - relative_position
-                    - update.rows_changed,
-            };
-            println!("Splitting parent to: {:?}", new_region);
-            self.regions.insert(position + update.rows_changed, new_region);
-        }
 
         // Remove all following regions, to iterate over and replace them.
         let mut following_regions = self.regions
-            .split_off(&position)
+            .split_off(&(position + 1))
             .into_iter();
 
-        // Insert the new region.
-        self.regions.insert(position, region.clone());
-
         // For an interleaved source, update all regions that it overlaps.
-        if let Interleaved(..) = &region.source {
-            println!();
-            println!("Updating overlapped regions...");
+        if interleaved {
             for (start, region) in following_regions.by_ref() {
                 // Do whatever is necessary to overlap this region.
                 if !self.overlap_region(&mut update, start, &region, node_ref)?
@@ -620,7 +592,7 @@ where Item: Copy + Debug + 'static,
                 let range = region.offset..node_range.end;
                 let added = self.count_within(&expanded, &range)?;
                 let changed = range.len();
-                self.split_region(update, start, region,
+                self.partial_overlap(update, start, region,
                     Region {
                         source: Interleaved(expanded, range),
                         offset: 0,
@@ -679,7 +651,7 @@ where Item: Copy + Debug + 'static,
                             region.offset, split_offset)?;
                     let mut more_expanded = expanded.clone();
                     more_expanded.push(node_ref.clone());
-                    self.split_region(update, start, region,
+                    self.partial_overlap(update, start, region,
                         Region {
                             source: Interleaved(more_expanded, first_range),
                             offset: region.offset + added_before_offset,
@@ -734,7 +706,7 @@ where Item: Copy + Debug + 'static,
                     Region {
                         source: Root(),
                         offset: range.start,
-                        length: range.len(),
+                        length: range.len() - 1,
                     }
                 } else {
                     // There are other nodes expanded in this region.
@@ -812,12 +784,12 @@ where Item: Copy + Debug + 'static,
         *update += effect;
     }
 
-    fn split_region(&mut self,
-                    update: &mut ModelUpdate,
-                    start: u64,
-                    region: &Region<Item>,
-                    changed_region: Region<Item>,
-                    unchanged_region: Region<Item>)
+    fn partial_overlap(&mut self,
+                       update: &mut ModelUpdate,
+                       start: u64,
+                       region: &Region<Item>,
+                       changed_region: Region<Item>,
+                       unchanged_region: Region<Item>)
     {
         let total_length = changed_region.length + unchanged_region.length;
 
@@ -833,16 +805,52 @@ where Item: Copy + Debug + 'static,
         println!("      and: {:?}", changed_region);
         println!("           {:?}", effect);
 
-        let first_position = start
-            + update.rows_added
-            - update.rows_removed;
+        let position_1 = start + update.rows_added - update.rows_removed;
+        let position_2 = position_1 + changed_region.length;
 
-        let second_position = first_position + changed_region.length;
-
-        self.regions.insert(first_position, changed_region);
-        self.regions.insert(second_position, unchanged_region);
+        self.regions.insert(position_1, changed_region);
+        self.regions.insert(position_2, unchanged_region);
 
         *update += effect;
+    }
+
+    fn split_region(&mut self,
+                    start: u64,
+                    original: &Region<Item>,
+                    first_part: Region<Item>,
+                    new_region: Region<Item>,
+                    second_part: Region<Item>)
+        -> ModelUpdate
+    {
+        let total_length =
+            first_part.length +
+            new_region.length +
+            second_part.length;
+
+        let rows_added = total_length - original.length;
+
+        let effect = ModelUpdate {
+            rows_added, 
+            rows_removed: 0,
+            rows_changed: new_region.length - rows_added,
+        };
+
+        println!();
+        println!("Splitting: {:?}", original);
+        println!("     into: {:?}", first_part);
+        println!("      and: {:?}", new_region);
+        println!("      and: {:?}", second_part);
+        println!("           {:?}", effect);
+
+        let position_1 = start;
+        let position_2 = position_1 + first_part.length;
+        let position_3 = position_2 + new_region.length;
+
+        self.regions.insert(position_1, first_part);
+        self.regions.insert(position_2, new_region);
+        self.regions.insert(position_3, second_part);
+
+        effect
     }
 
     pub fn merge_regions(&mut self) {
