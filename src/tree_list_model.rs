@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 use std::num::TryFromIntError;
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::ops::{DerefMut, Range};
+use std::ops::{AddAssign, DerefMut, Range};
 
 use gtk::prelude::{IsA, Cast};
 use gtk::glib::Object;
@@ -201,6 +201,14 @@ pub struct ModelUpdate {
     pub rows_added: u64,
     pub rows_removed: u64,
     pub rows_changed: u64,
+}
+
+impl AddAssign for ModelUpdate {
+    fn add_assign(&mut self, other: ModelUpdate) {
+        self.rows_added += other.rows_added;
+        self.rows_removed += other.rows_removed;
+        self.rows_changed += other.rows_changed;
+    }
 }
 
 pub struct TreeListModel<Item, RowData> {
