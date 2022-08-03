@@ -519,90 +519,48 @@ where Item: Copy + Debug + 'static,
     {
         use Source::*;
 
-        // Remove the region starting at this position.
-        let region = self.regions.remove(&position).ok_or_else(||
-            InternalError(format!(
-                "No region to delete at position {}", position)))?;
+        // Clone the region starting at this position.
+        let region = self.regions
+            .get(&position)
+            .ok_or_else(||
+                InternalError(format!(
+                    "No region to delete at position {}", position)))?
+            .clone();
 
-        println!();
-        println!("Removed: {:?}", region);
-
-        // Calculate model update and replace if necessary.
-        let mut update = match &region.source {
-            // Interleaved region, must be replaced with a root region.
-            Interleaved(expanded, range) if expanded.len() == 1 => {
-                let (_, rows_removed) =
-                    self.count_rows(expanded, range, node_ref,
-                                    region.offset,
-                                    region.offset + region.length)?;
-                let rows_changed = range.len() - 1;
-                let new_region = Region {
-                    source: Root(),
-                    offset: range.start + 1,
-                    length: rows_changed,
-                };
-                println!("    for: {:?}", new_region);
-                self.regions.insert(position, new_region);
-                ModelUpdate {
-                    rows_added: 0,
-                    rows_removed,
-                    rows_changed,
-                }
-            },
-            // Interleaved region, must be replaced with a modified one.
-            Interleaved(expanded, range) => {
-                let (_, rows_removed) =
-                    self.count_rows(expanded, range, node_ref,
-                                    region.offset,
-                                    region.offset + region.length)?;
-                let rows_changed = region.length - rows_removed;
-                let mut less_expanded = expanded.clone();
-                less_expanded.retain(|rc| !Rc::ptr_eq(rc, node_ref));
-                let new_region = Region {
-                    source: Interleaved(less_expanded, range.clone()),
-                    offset: 0,
-                    length: rows_changed,
-                };
-                println!("    for: {:?}", new_region);
-                self.regions.insert(position, new_region);
-                ModelUpdate {
-                    rows_added: 0,
-                    rows_removed,
-                    rows_changed,
-                }
-            },
-            // Non-interleaved region is just removed.
-            Children(_) => ModelUpdate {
-                rows_added: 0,
-                rows_removed: node_ref.borrow().child_count,
-                rows_changed: 0,
-            },
-            // Root regions cannot be collapsed.
-            Root() => return Err(InternalError(String::from(
-                "Unable to collapse root region")))
-        };
-
-        println!("         {} removed, {} changed",
-                 update.rows_removed, update.rows_changed);
-
-        // Remove all following regions, to iterate over and replace them.
+        // Remove it with following regions, to iterate over and replace them.
         let mut following_regions = self.regions
-            .split_off(&(position + 1))
+            .split_off(&position)
             .into_iter();
 
-        // For an interleaved source, update all regions that it overlapped.
-        if let Interleaved(..) = &region.source {
-            println!();
-            println!("Updating overlapped regions...");
-            for (start, region) in following_regions.by_ref() {
-                // Do whatever is necessary to unoverlap this region.
-                if !self.unoverlap_region(&mut update, start, &region, node_ref)?
-                {
-                    // No further overlapping regions.
-                    break;
+        // Process the effects of removing this region.
+        let update = match &region.source {
+            // Root regions cannot be collapsed.
+            Root() => return Err(InternalError(String::from(
+                "Unable to collapse root region"))),
+            // Non-interleaved region is just removed.
+            Children(_) => {
+                following_regions.next();
+                ModelUpdate {
+                    rows_added: 0,
+                    rows_removed: node_ref.borrow().child_count,
+                    rows_changed: 0,
                 }
+            },
+            // For an interleaved source, update all overlapped regions.
+            Interleaved(..) => {
+                let mut update = ModelUpdate::default();
+                for (start, region) in following_regions.by_ref() {
+                    // Do whatever is necessary to unoverlap this region.
+                    if !self.unoverlap_region(
+                        &mut update, start, &region, node_ref)?
+                    {
+                        // No further overlapping regions.
+                        break;
+                    }
+                }
+                update
             }
-        }
+        };
 
         // Shift all following regions up by the removed rows.
         for (start, region) in following_regions {
