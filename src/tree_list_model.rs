@@ -294,11 +294,11 @@ where Item: Copy + Debug + 'static,
         })
     }
 
-    fn count_rows_to(&self,
-                     expanded: &[ItemRc<Item>],
-                     range: &Range<u64>,
-                     node_ref: &ItemRc<Item>,
-                     offset: u64)
+    fn count_to_offset(&self,
+                       expanded: &[ItemRc<Item>],
+                       range: &Range<u64>,
+                       node_ref: &ItemRc<Item>,
+                       offset: u64)
         -> Result<u64, ModelError>
     {
         use SearchResult::*;
@@ -322,18 +322,18 @@ where Item: Copy + Debug + 'static,
         })
     }
 
-    fn count_rows(&self,
-                  expanded: &[ItemRc<Item>],
-                  range: &Range<u64>,
-                  node_ref: &ItemRc<Item>,
-                  offset: u64,
-                  end: u64)
+    fn count_around_offset(&self,
+                           expanded: &[ItemRc<Item>],
+                           range: &Range<u64>,
+                           node_ref: &ItemRc<Item>,
+                           offset: u64,
+                           end: u64)
         -> Result<(u64, u64), ModelError>
     {
         let rows_before_offset =
-            self.count_rows_to(expanded, range, node_ref, offset)?;
+            self.count_to_offset(expanded, range, node_ref, offset)?;
         let rows_before_end =
-            self.count_rows_to(expanded, range, node_ref, end)?;
+            self.count_to_offset(expanded, range, node_ref, end)?;
         let rows_after_offset = rows_before_end - rows_before_offset;
         Ok((rows_before_offset, rows_after_offset))
     }
@@ -352,11 +352,11 @@ where Item: Copy + Debug + 'static,
             .sum())
     }
 
-    pub fn insert_region(&mut self,
-                         position: u64,
-                         node_ref: &ItemRc<Item>,
-                         parent_start: u64,
-                         parent: &Region<Item>)
+    pub fn expand(&mut self,
+                  position: u64,
+                  node_ref: &ItemRc<Item>,
+                  parent_start: u64,
+                  parent: &Region<Item>)
         -> Result<ModelUpdate, ModelError>
     {
         use IntervalEnd::*;
@@ -512,9 +512,9 @@ where Item: Copy + Debug + 'static,
         Ok(update)
     }
 
-    pub fn delete_region(&mut self,
-                         position: u64,
-                         node_ref: &ItemRc<Item>)
+    pub fn collapse(&mut self,
+                    position: u64,
+                    node_ref: &ItemRc<Item>)
         -> Result<ModelUpdate, ModelError>
     {
         use Source::*;
@@ -644,9 +644,10 @@ where Item: Copy + Debug + 'static,
                 // This region is fully overlapped by the new node.
                 // Replace with a new interleaved region.
                 let (added_before_offset, added_after_offset) =
-                    self.count_rows(expanded, range, node_ref,
-                                    region.offset,
-                                    region.offset + region.length)?;
+                    self.count_around_offset(
+                        expanded, range, node_ref,
+                        region.offset,
+                        region.offset + region.length)?;
                 let mut more_expanded = expanded.clone();
                 more_expanded.push(node_ref.clone());
                 self.replace_region(update, start, region,
@@ -673,8 +674,9 @@ where Item: Copy + Debug + 'static,
                 } else {
                     // Split the region into overlapped and unoverlapped parts.
                     let (added_before_offset, added_after_offset) =
-                        self.count_rows(expanded, range, node_ref,
-                                        region.offset, split_offset)?;
+                        self.count_around_offset(
+                            expanded, range, node_ref,
+                            region.offset, split_offset)?;
                     let mut more_expanded = expanded.clone();
                     more_expanded.push(node_ref.clone());
                     self.split_region(update, start, region,
@@ -737,9 +739,10 @@ where Item: Copy + Debug + 'static,
                 } else {
                     // There are other nodes expanded in this region.
                     let (removed_before_offset, removed_after_offset) =
-                        self.count_rows(expanded, range, node_ref,
-                                        region.offset,
-                                        region.offset + region.length)?;
+                        self.count_around_offset(
+                            expanded, range, node_ref,
+                            region.offset,
+                            region.offset + region.length)?;
                     Region {
                         source: Interleaved(less_expanded, range.clone()),
                         offset: region.offset - removed_before_offset,
@@ -914,8 +917,8 @@ where Item: Copy + Debug + 'static,
 
         // Update the region map.
         let update = if expanded {
-            // Insert a new region for this node.
-            self.insert_region(position, node_ref, start, &region)?
+            // Expand this node.
+            self.expand(position, node_ref, start, &region)?
         } else {
             // Collapse children of this node, from last to first.
             let mut child_rows_removed = 0;
@@ -936,8 +939,8 @@ where Item: Copy + Debug + 'static,
                 }
             }
 
-            // Delete the region associated with this node.
-            let mut update = self.delete_region(position, node_ref)?;
+            // Collapse this node.
+            let mut update = self.collapse(position, node_ref)?;
 
             // Include results of collapsing children in rows removed.
             update.rows_removed += child_rows_removed;
