@@ -196,7 +196,7 @@ where Item: Clone + Debug
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct ModelUpdate {
     pub rows_added: u64,
     pub rows_removed: u64,
@@ -208,6 +208,15 @@ impl AddAssign for ModelUpdate {
         self.rows_added += other.rows_added;
         self.rows_removed += other.rows_removed;
         self.rows_changed += other.rows_changed;
+    }
+}
+
+impl Debug for ModelUpdate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>)
+        -> Result<(), std::fmt::Error>
+    {
+        write!(f, "{} added, {} removed, {} changed",
+            self.rows_added, self.rows_removed, self.rows_changed)
     }
 }
 
@@ -403,6 +412,7 @@ where Item: Copy + Debug + 'static,
                 let parent_end = parent.offset + parent.length;
                 let new_region_end = min(interval_end, parent_end);
                 let range = start..new_region_end;
+                let changed = range.len() - 1;
                 let added = self.count_within(&expanded, &range)?;
                 self.split_region(parent_start, parent,
                     Region {
@@ -413,7 +423,7 @@ where Item: Copy + Debug + 'static,
                     Region {
                         source: Interleaved(expanded, range),
                         offset: 0,
-                        length: added,
+                        length: changed + added,
                     },
                     Region {
                         source: Root(),
@@ -511,7 +521,9 @@ where Item: Copy + Debug + 'static,
                 "Unable to collapse root region"))),
             // Non-interleaved region is just removed.
             Children(_) => {
-                following_regions.next();
+                let (_, region) = following_regions.next().unwrap();
+                println!();
+                println!("Removing: {:?}", region);
                 ModelUpdate {
                     rows_added: 0,
                     rows_removed: node_ref.borrow().child_count,
@@ -829,17 +841,24 @@ where Item: Copy + Debug + 'static,
 
         let rows_added = total_length - original.length;
 
+        let rows_changed =
+            original.length -
+            first_part.length -
+            second_part.length;
+
         let effect = ModelUpdate {
             rows_added, 
             rows_removed: 0,
-            rows_changed: new_region.length - rows_added,
+            rows_changed,
         };
 
         println!();
         println!("Splitting: {:?}", original);
         println!("     into: {:?}", first_part);
         println!("      and: {:?}", new_region);
-        println!("      and: {:?}", second_part);
+        if second_part.length > 0 {
+            println!("      and: {:?}", second_part);
+        }
         println!("           {:?}", effect);
 
         let position_1 = start;
@@ -848,7 +867,9 @@ where Item: Copy + Debug + 'static,
 
         self.regions.insert(position_1, first_part);
         self.regions.insert(position_2, new_region);
-        self.regions.insert(position_3, second_part);
+        if second_part.length > 0 {
+            self.regions.insert(position_3, second_part);
+        }
 
         effect
     }
@@ -960,9 +981,6 @@ where Item: Copy + Debug + 'static,
         let parent_ref = node.parent.upgrade().ok_or(ParentDropped)?;
         parent_ref.borrow_mut().set_expanded(node_ref, expanded);
 
-        println!();
-        println!("Update: {} added, {} removed, {} changed",
-                 update.rows_added, update.rows_removed, update.rows_changed);
         println!();
         println!("Region map:");
         for (start, region) in self.regions.iter() {
