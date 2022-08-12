@@ -379,7 +379,7 @@ where Item: Copy + Debug + 'static,
 
         // Find the start of the parent region.
         let (&parent_start, _) = self.regions
-            .range(..=position)
+            .range(..position)
             .next_back()
             .ok_or_else(||
                 InternalError(format!(
@@ -968,6 +968,7 @@ where Item: Copy + Debug + 'static,
                 .clone()
                 .range(position..)
                 .rev()
+                .filter(|(_, region)| region.offset == 0)
             {
                 use Source::*;
                 if let Children(child_ref) = &region.source {
