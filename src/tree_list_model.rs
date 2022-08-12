@@ -771,20 +771,21 @@ where Item: Copy + Debug + 'static,
                 // This region is overlapped. Replace with a new one.
                 let mut less_expanded = expanded.to_vec();
                 less_expanded.retain(|rc| !Rc::ptr_eq(rc, node_ref));
+                let (removed_before_offset, removed_after_offset) =
+                    self.count_around_offset(
+                        expanded, range, node_ref,
+                        region.offset,
+                        region.offset + region.length)?;
                 let new_region = if less_expanded.is_empty() {
                     // This node was the last expanded one in this region.
                     Region {
                         source: Root(),
-                        offset: range.start,
-                        length: range.len() - 1,
+                        offset: range.start +
+                            region.offset - removed_before_offset,
+                        length: region.length - removed_after_offset,
                     }
                 } else {
                     // There are other nodes expanded in this region.
-                    let (removed_before_offset, removed_after_offset) =
-                        self.count_around_offset(
-                            expanded, range, node_ref,
-                            region.offset,
-                            region.offset + region.length)?;
                     Region {
                         source: Interleaved(less_expanded, range.clone()),
                         offset: region.offset - removed_before_offset,
@@ -941,7 +942,7 @@ where Item: Copy + Debug + 'static,
             parent_after.length;
 
         let mut update = ModelUpdate {
-            rows_added: 0,
+            rows_added,
             rows_removed: 0,
             rows_changed,
         };
@@ -965,8 +966,10 @@ where Item: Copy + Debug + 'static,
         if parent_after.length > 0 {
             if interleaved {
                 self.overlap_region(
-                    &mut update, position_after, &parent_after, node_ref)?;
-                update.rows_added += rows_added;
+                    &mut update,
+                    position_after - rows_added,
+                    &parent_after,
+                    node_ref)?;
             } else {
                 self.insert_region(position_after, parent_after)?;
             }
