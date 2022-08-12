@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::cmp::{min, Ordering};
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -193,6 +194,49 @@ where Item: Clone + Debug
                         .collect::<Vec<Item>>()),
         }?;
         write!(f, ", offset {}, length {}", self.offset, self.length)
+    }
+}
+
+impl<Item> Region<Item>
+where Item: Clone + Debug
+{
+    fn merge(
+        region_a: &Region<Item>,
+        region_b: &Region<Item>
+    ) -> Option<Region<Item>> {
+        use Source::*;
+        match (&region_a.source, &region_b.source) {
+            (Interleaved(exp_a, range_a),
+             Interleaved(exp_b, range_b))
+                if exp_a.len() == exp_b.len() &&
+                    exp_a.iter()
+                        .zip(exp_b.iter())
+                        .all(|(a, b)| Rc::ptr_eq(a, b)) => Some(
+                    Region {
+                        source: Interleaved(
+                            exp_a.clone(),
+                            range_a.start..range_b.end),
+                        offset: region_a.offset,
+                        length: region_a.length + region_b.length,
+                    }
+                ),
+            (Children(a_ref), Children(b_ref))
+                if Rc::ptr_eq(a_ref, b_ref) => Some(
+                    Region {
+                        source: region_a.source.clone(),
+                        offset: region_a.offset,
+                        length: region_a.length + region_b.length,
+                    }
+                ),
+            (Root(), Root()) => Some(
+                Region {
+                    source: Root(),
+                    offset: region_a.offset,
+                    length: region_a.length + region_b.length,
+                }
+            ),
+            (..) => None,
+        }
     }
 }
 
@@ -496,7 +540,7 @@ where Item: Copy + Debug + 'static,
 
         // Shift all remaining regions down by the added rows.
         for (start, region) in following_regions {
-            self.regions.insert(start + update.rows_added, region);
+            self.insert_region(start + update.rows_added, region)?;
         }
 
         // Merge adjacent regions with the same source.
@@ -562,7 +606,7 @@ where Item: Copy + Debug + 'static,
 
         // Shift all following regions up by the removed rows.
         for (start, region) in following_regions {
-            self.regions.insert(start - update.rows_removed, region);
+            self.insert_region(start - update.rows_removed, region)?;
         }
 
         // Merge adjacent regions with the same source.
@@ -588,12 +632,12 @@ where Item: Copy + Debug + 'static,
         Ok(match &region.source {
             Children(_) => {
                 // This region is overlapped but self-contained.
-                self.preserve_region(update, start, region, true);
+                self.preserve_region(update, start, region, true)?;
                 true
             },
             Root() if region.offset >= node_range.end => {
                 // This region is not overlapped.
-                self.preserve_region(update, start, region, false);
+                self.preserve_region(update, start, region, false)?;
                 false
             },
             Root() if region.offset + region.length <= node_range.end => {
@@ -608,7 +652,7 @@ where Item: Copy + Debug + 'static,
                         offset: 0,
                         length: region.length + added,
                     }
-                );
+                )?;
                 true
             },
             Root() => {
@@ -629,13 +673,13 @@ where Item: Copy + Debug + 'static,
                         offset: region.offset + changed,
                         length: region.length - changed,
                     }
-                );
+                )?;
                 // No longer overlapping.
                 false
             },
             Interleaved(_, range) if range.start >= node_range.end => {
                 // This region is not overlapped.
-                self.preserve_region(update, start, region, false);
+                self.preserve_region(update, start, region, false)?;
                 false
             },
             Interleaved(expanded, range) if range.end <= node_range.end => {
@@ -654,7 +698,7 @@ where Item: Copy + Debug + 'static,
                         offset: region.offset + added_before_offset,
                         length: region.length + added_after_offset,
                     }
-                );
+                )?;
                 true
             },
             Interleaved(expanded, range) => {
@@ -667,7 +711,7 @@ where Item: Copy + Debug + 'static,
                     self.count_within(expanded, &first_range)?;
                 if region.offset >= split_offset {
                     // This region begins after the split, so isn't overlapped.
-                    self.preserve_region(update, start, region, false);
+                    self.preserve_region(update, start, region, false)?;
                     false
                 } else {
                     // Split the region into overlapped and unoverlapped parts.
@@ -688,7 +732,7 @@ where Item: Copy + Debug + 'static,
                             offset: 0,
                             length: region.length - split_offset,
                         }
-                    );
+                    )?;
                     // No longer overlapping.
                     false
                 }
@@ -710,17 +754,17 @@ where Item: Copy + Debug + 'static,
         Ok(match &region.source {
             Children(_) => {
                 // This region is overlapped but self-contained.
-                self.preserve_region(update, start, region, true);
+                self.preserve_region(update, start, region, true)?;
                 true
             },
             Root() => {
                 // This region is not overlapped.
-                self.preserve_region(update, start, region, false);
+                self.preserve_region(update, start, region, false)?;
                 false
             },
             Interleaved(_, range) if range.start >= node_range.end => {
                 // This region is not overlapped.
-                self.preserve_region(update, start, region, false);
+                self.preserve_region(update, start, region, false)?;
                 false
             },
             Interleaved(expanded, range) => {
@@ -747,10 +791,34 @@ where Item: Copy + Debug + 'static,
                         length: region.length - removed_after_offset,
                     }
                 };
-                self.replace_region(update, start, region, new_region);
+                self.replace_region(update, start, region, new_region)?;
                 true
             }
         })
+    }
+
+    fn insert_region(&mut self,
+                     position: u64,
+                     region: Region<Item>)
+        -> Result<(), ModelError>
+    {
+        match self.regions.entry(position) {
+            Entry::Occupied(mut entry) => {
+                let old_region = entry.get();
+                if old_region.length == 0 {
+                    entry.insert(region);
+                    Ok(())
+                } else {
+                    Err(InternalError(format!(
+                        "At position {}, overwriting {:?} with {:?}",
+                        position, entry.get(), region)))
+                }
+            },
+            Entry::Vacant(entry) => {
+                entry.insert(region);
+                Ok(())
+            }
+        }
     }
 
     fn preserve_region(&mut self,
@@ -758,16 +826,19 @@ where Item: Copy + Debug + 'static,
                        start: u64,
                        region: &Region<Item>,
                        include_as_changed: bool)
+        -> Result<(), ModelError>
     {
         let new_position = start
             + update.rows_added
             - update.rows_removed;
 
-        self.regions.insert(new_position, region.clone());
+        self.insert_region(new_position, region.clone())?;
 
         if include_as_changed {
             update.rows_changed += region.length;
         }
+
+        Ok(())
     }
 
     fn replace_region(&mut self,
@@ -775,6 +846,7 @@ where Item: Copy + Debug + 'static,
                       start: u64,
                       region: &Region<Item>,
                       new_region: Region<Item>)
+        -> Result<(), ModelError>
     {
         use Ordering::*;
 
@@ -805,9 +877,11 @@ where Item: Copy + Debug + 'static,
             + update.rows_added
             - update.rows_removed;
 
-        self.regions.insert(new_position, new_region);
+        self.insert_region(new_position, new_region)?;
 
         *update += effect;
+
+        Ok(())
     }
 
     fn partial_overlap(&mut self,
@@ -816,6 +890,7 @@ where Item: Copy + Debug + 'static,
                        region: &Region<Item>,
                        changed_region: Region<Item>,
                        unchanged_region: Region<Item>)
+        -> Result<(), ModelError>
     {
         let total_length = changed_region.length + unchanged_region.length;
 
@@ -827,17 +902,19 @@ where Item: Copy + Debug + 'static,
 
         println!();
         println!("Splitting: {:?}", region);
-        println!("     into: {:?}", unchanged_region);
-        println!("      and: {:?}", changed_region);
+        println!("     into: {:?}", changed_region);
+        println!("      and: {:?}", unchanged_region);
         println!("           {:?}", effect);
 
         let position_1 = start + update.rows_added - update.rows_removed;
         let position_2 = position_1 + changed_region.length;
 
-        self.regions.insert(position_1, changed_region);
-        self.regions.insert(position_2, unchanged_region);
+        self.insert_region(position_1, changed_region)?;
+        self.insert_region(position_2, unchanged_region)?;
 
         *update += effect;
+
+        Ok(())
     }
 
     fn split_parent(&mut self,
@@ -882,15 +959,15 @@ where Item: Copy + Debug + 'static,
         let new_position = parent_start + parent_before.length;
         let position_after = new_position + new_region.length;
 
-        self.regions.insert(parent_start, parent_before);
-        self.regions.insert(new_position, new_region);
+        self.insert_region(parent_start, parent_before)?;
+        self.insert_region(new_position, new_region)?;
 
         if parent_after.length > 0 {
             if interleaved {
                 self.overlap_region(
                     &mut update, position_after, &parent_after, node_ref)?;
             } else {
-                self.regions.insert(position_after, parent_after);
+                self.insert_region(position_after, parent_after)?;
             }
         }
 
@@ -898,47 +975,26 @@ where Item: Copy + Debug + 'static,
     }
 
     pub fn merge_regions(&mut self) {
-        use Source::*;
+
+        println!();
+        println!("Before merge:");
+        for (start, region) in self.regions.iter() {
+            println!("{}: {:?}", start, region);
+        }
+
         self.regions = self.regions
             .split_off(&0)
             .into_iter()
             .coalesce(|(start_a, region_a), (start_b, region_b)|
-                match (&region_a.source, &region_b.source) {
-                    (Interleaved(exp_a, range_a),
-                     Interleaved(exp_b, range_b))
-                        if exp_a.len() == exp_b.len() &&
-                            exp_a.iter()
-                                .zip(exp_b.iter())
-                                .all(|(a, b)| Rc::ptr_eq(a, b)) => Ok((
-                            start_a,
-                            Region {
-                                source: Interleaved(
-                                    exp_a.clone(),
-                                    range_a.start..range_b.end),
-                                offset: region_a.offset,
-                                length: region_a.length + region_b.length,
-                            }
-                        )
-                    ),
-                    (Children(a_ref), Children(b_ref))
-                        if Rc::ptr_eq(a_ref, b_ref) => Ok((
-                            start_a,
-                            Region {
-                                source: region_a.source,
-                                offset: region_a.offset,
-                                length: region_a.length + region_b.length,
-                            }
-                        )
-                    ),
-                    (Root(), Root()) => Ok((
-                        start_a,
-                        Region {
-                            source: Root(),
-                            offset: region_a.offset,
-                            length: region_a.length + region_b.length,
-                        }
-                    )),
-                    (..) => Err(((start_a, region_a), (start_b, region_b)))
+                match Region::merge(&region_a, &region_b) {
+                    Some(region_c) => {
+                        println!();
+                        println!("Merging: {:?}", region_a);
+                        println!("    and: {:?}", region_b);
+                        println!("   into: {:?}", region_c);
+                        Ok((start_a, region_c))
+                    },
+                    None => Err(((start_a, region_a), (start_b, region_b)))
                 }
             )
             .collect();
