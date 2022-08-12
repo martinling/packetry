@@ -941,7 +941,7 @@ where Item: Copy + Debug + 'static,
             parent_after.length;
 
         let mut update = ModelUpdate {
-            rows_added,
+            rows_added: 0,
             rows_removed: 0,
             rows_changed,
         };
@@ -966,6 +966,7 @@ where Item: Copy + Debug + 'static,
             if interleaved {
                 self.overlap_region(
                     &mut update, position_after, &parent_after, node_ref)?;
+                update.rows_added += rows_added;
             } else {
                 self.insert_region(position_after, parent_after)?;
             }
