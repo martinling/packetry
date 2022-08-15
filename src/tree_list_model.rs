@@ -419,10 +419,8 @@ where Item: Copy + Debug + 'static,
         // Extract some details of the node being expanded.
         let node = node_ref.borrow();
         let node_start = node.interval.start;
-        let interleaved = match node.interval.end {
-            Complete(end) if end == node_start => false,
-            _ => true,
-        };
+        let interleaved = !matches!(node.interval.end,
+            Complete(end) if end == node_start);
 
         // Find the start of the parent region.
         let (&parent_start, _) = self.regions
