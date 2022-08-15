@@ -470,9 +470,13 @@ where Item: Copy + Debug + 'static,
                     }]
                 )?
             },
-            // Last root item in a region expanded. There must be a following
-            // interleaved region, which will be updated later.
-            (true, Root()) if relative_position == parent.length => {
+            // Last root item in a region expanded, but not the last item of
+            // the whole model. There must be a following interleaved region,
+            // which will be updated later.
+            (true, Root())
+                if (relative_position == parent.length) &&
+                    (parent.offset + relative_position != self.item_count) =>
+            {
                 let mut update = ModelUpdate::default();
                 self.preserve_region(
                     &mut update, parent_start, &parent, false)?;
