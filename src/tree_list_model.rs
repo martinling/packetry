@@ -464,7 +464,7 @@ where Item: Copy + Debug + 'static,
                     },
                     Region {
                         source: parent.source.clone(),
-                        offset: relative_position,
+                        offset: parent.offset + relative_position,
                         length: parent.length - relative_position,
                     }
                 )?
