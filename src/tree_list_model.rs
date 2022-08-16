@@ -763,7 +763,7 @@ where Item: Copy + Debug + 'static,
                 // Work out the offset at which this source would be split.
                 let split_offset = first_range.len() - 1 +
                     self.count_within(expanded, &first_range)?;
-                if region.offset >= split_offset {
+                if region.offset > split_offset {
                     // This region begins after the split, so isn't overlapped.
                     self.preserve_region(update, start, region, false)?
                 } else {
