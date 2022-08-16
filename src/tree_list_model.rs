@@ -285,7 +285,7 @@ where Item: Copy + Debug + 'static,
     pub fn new(capture: Arc<Mutex<Capture>>) -> Result<Self, ModelError> {
         use Source::*;
         let mut cap = capture.lock().or(Err(LockError))?;
-        let item_count = cap.item_count(&None)?;
+        let item_count = cap.item_count()?;
         let mut model = TreeListModel {
             _marker: PhantomData,
             capture: capture.clone(),
@@ -539,16 +539,22 @@ where Item: Copy + Debug + 'static,
                         offset: 0,
                         length: changed + added,
                     },
-                    vec![Region {
-                        source: Root(),
-                        offset: node_start + 1,
-                        length: 1,
-                    },
-                    Region {
-                        source: Interleaved(parent_expanded.clone(), range_3),
-                        offset: 0,
-                        length: parent.length - relative_position - changed - 1,
-                    }]
+                    if relative_position == parent.length {
+                        vec![]
+                    } else {
+                        vec![Region {
+                            source: Root(),
+                            offset: node_start + 1,
+                            length: 1,
+                        },
+                        Region {
+                            source:
+                                Interleaved(parent_expanded.clone(), range_3),
+                            offset: 0,
+                            length:
+                                parent.length - relative_position - changed - 1,
+                        }]
+                    }
                 )?
             },
             // Other combinations are not supported.
@@ -1179,7 +1185,7 @@ where Item: Copy + Debug + 'static,
         Ok(match &region.source {
             // Simple region containing top level items.
             Root() => {
-                let item = cap.item(&None, index)?;
+                let item = cap.item(index)?;
                 let parent_rc: NodeRc<Item> = self.root.clone();
                 self.node(cap, &parent_rc, index, item)?
             },

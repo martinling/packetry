@@ -704,11 +704,11 @@ pub enum SearchResult<Item> {
 }
 
 pub trait ItemSource<Item> {
-    fn item(&mut self, parent: &Option<Item>, index: u64)
+    fn item(&mut self, index: u64)
         -> Result<Item, CaptureError>;
     fn child_item(&mut self, parent: &Item, index: u64)
         -> Result<Item, CaptureError>;
-    fn item_count(&mut self, parent: &Option<Item>)
+    fn item_count(&mut self)
         -> Result<u64, CaptureError>;
     fn child_count(&mut self, parent: &Item) -> Result<u64, CaptureError>;
     fn item_end(&mut self, item: &Item, index: u64)
@@ -743,17 +743,12 @@ struct Transfer {
 }
 
 impl ItemSource<TrafficItem> for Capture {
-    fn item(&mut self, parent: &Option<TrafficItem>, index: u64)
+    fn item(&mut self, index: u64)
         -> Result<TrafficItem, CaptureError>
     {
-        match parent {
-            None => {
-                let item_id = TrafficItemId::from(index);
-                let transfer_id = self.item_index.get(item_id)?;
-                Ok(TrafficItem::Transfer(transfer_id))
-            },
-            Some(item) => self.child_item(item, index)
-        }
+        let item_id = TrafficItemId::from(index);
+        let transfer_id = self.item_index.get(item_id)?;
+        Ok(TrafficItem::Transfer(transfer_id))
     }
 
     fn child_item(&mut self, parent: &TrafficItem, index: u64)
@@ -778,13 +773,10 @@ impl ItemSource<TrafficItem> for Capture {
         })
     }
 
-    fn item_count(&mut self, parent: &Option<TrafficItem>)
+    fn item_count(&mut self)
         -> Result<u64, CaptureError>
     {
-        match parent {
-            None => Ok(self.item_index.len()),
-            Some(item) => self.child_count(item)
-        }
+        Ok(self.item_index.len())
     }
 
     fn child_count(&mut self, parent: &TrafficItem)
@@ -1264,13 +1256,10 @@ impl ItemSource<TrafficItem> for Capture {
 }
 
 impl ItemSource<DeviceItem> for Capture {
-    fn item(&mut self, parent: &Option<DeviceItem>, index: u64)
+    fn item(&mut self, index: u64)
         -> Result<DeviceItem, CaptureError>
     {
-        match parent {
-            None => Ok(DeviceItem::Device(DeviceId::from(index + 1))),
-            Some(item) => self.child_item(item, index)
-        }
+        Ok(DeviceItem::Device(DeviceId::from(index + 1)))
     }
 
     fn child_item(&mut self, parent: &DeviceItem, index: u64)
@@ -1310,13 +1299,10 @@ impl ItemSource<DeviceItem> for Capture {
         })
     }
 
-    fn item_count(&mut self, parent: &Option<DeviceItem>)
+    fn item_count(&mut self)
         -> Result<u64, CaptureError>
     {
-        Ok(match parent {
-            None => (self.device_data.len() - 1) as u64,
-            Some(item) => self.child_count(item)?,
-        })
+        Ok((self.device_data.len() - 1) as u64)
     }
 
     fn child_count(&mut self, parent: &DeviceItem)
@@ -1385,7 +1371,7 @@ impl ItemSource<DeviceItem> for Capture {
                   index: u64)
         -> Result<SearchResult<DeviceItem>, CaptureError>
     {
-        let item = self.item(&None, region.start + index)?;
+        let item = self.item(region.start + index)?;
         Ok(SearchResult::TopLevelItem(index, item))
     }
 
@@ -1526,7 +1512,7 @@ mod tests {
                     let mut out_writer = BufWriter::new(out_file);
                     let num_items = cap.item_index.len();
                     for item_id in 0 .. num_items {
-                        let item = cap.item(&None, item_id).unwrap();
+                        let item = cap.item(item_id).unwrap();
                         write_item(&mut cap, &item, 0, &mut out_writer);
                     }
                 }
