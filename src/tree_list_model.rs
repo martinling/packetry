@@ -38,9 +38,9 @@ pub enum ModelError {
 use ModelError::{ParentDropped, LockError, AlreadyDone, InternalError};
 
 pub type ItemRc<Item> = Rc<RefCell<ItemNode<Item>>>;
-pub type NodeRc<Item> = Rc<RefCell<dyn Node<Item>>>;
+type NodeRc<Item> = Rc<RefCell<dyn Node<Item>>>;
 
-pub trait Node<Item> {
+trait Node<Item> {
     /// Access the expanded children of this node.
     fn expanded_children(&self) -> &ExpandedChildren<Item>;
 
@@ -48,11 +48,11 @@ pub trait Node<Item> {
     fn expanded_children_mut(&mut self) -> &mut ExpandedChildren<Item>;
 }
 
-pub struct ExpandedChildren<Item> {
+struct ExpandedChildren<Item> {
     map: BTreeMap<u64, ItemRc<Item>>
 }
 
-pub struct RootNode<Item> {
+struct RootNode<Item> {
     /// Expanded top level items.
     expanded: ExpandedChildren<Item>,
 }
@@ -120,7 +120,7 @@ impl<Item> Node<Item> for ItemNode<Item> {
 impl<Item> ItemNode<Item>
 where Item: 'static
 {
-    pub fn parent_is(&self, node_ref: &ItemRc<Item>)
+    fn parent_is(&self, node_ref: &ItemRc<Item>)
         -> Result<bool, ModelError>
     {
         let parent_ref = self.parent.upgrade().ok_or(ParentDropped)?;
@@ -164,14 +164,14 @@ where Item: 'static
 }
 
 #[derive(Clone)]
-pub enum Source<Item> {
+enum Source<Item> {
     Root(),
     Children(ItemRc<Item>),
     Interleaved(Vec<ItemRc<Item>>, Range<u64>),
 }
 
 #[derive(Clone)]
-pub struct Region<Item> {
+struct Region<Item> {
     source: Source<Item>,
     offset: u64,
     length: u64,
@@ -306,7 +306,7 @@ where Item: Copy + Debug + 'static,
         Ok(model)
     }
 
-    pub fn node(&self,
+    fn node(&self,
                 mut cap: MutexGuard<'_, Capture>,
                 parent_rc: &NodeRc<Item>,
                 index: u64,
@@ -416,7 +416,7 @@ where Item: Copy + Debug + 'static,
             .sum())
     }
 
-    pub fn expand(&mut self,
+    fn expand(&mut self,
                   position: u64,
                   node_ref: &ItemRc<Item>)
         -> Result<ModelUpdate, ModelError>
@@ -583,7 +583,7 @@ where Item: Copy + Debug + 'static,
         Ok(update)
     }
 
-    pub fn collapse(&mut self,
+    fn collapse(&mut self,
                     position: u64,
                     node_ref: &ItemRc<Item>)
         -> Result<ModelUpdate, ModelError>
@@ -1081,7 +1081,7 @@ where Item: Copy + Debug + 'static,
         Ok(update)
     }
 
-    pub fn merge_regions(&mut self) {
+    fn merge_regions(&mut self) {
 
         println!();
         println!("Before merge:");
