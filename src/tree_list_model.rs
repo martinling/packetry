@@ -41,19 +41,20 @@ pub type ItemRc<Item> = Rc<RefCell<ItemNode<Item>>>;
 pub type NodeRc<Item> = Rc<RefCell<dyn Node<Item>>>;
 
 pub trait Node<Item> {
-    /// Whether this node has an expanded child at this index.
-    fn has_expanded(&self, index: u64) -> bool;
+    /// Access the expanded children of this node.
+    fn expanded_children(&self) -> &ExpandedChildren<Item>;
 
-    /// Get the expanded child node with this index.
-    fn get_expanded(&self, index: u64) -> Option<ItemRc<Item>>;
+    /// Mutably access the expanded children of this node.
+    fn expanded_children_mut(&mut self) -> &mut ExpandedChildren<Item>;
+}
 
-    /// Set whether this child of the node is expanded.
-    fn set_expanded(&mut self, child_rc: &ItemRc<Item>, expanded: bool);
+pub struct ExpandedChildren<Item> {
+    map: BTreeMap<u64, ItemRc<Item>>
 }
 
 pub struct RootNode<Item> {
-    /// Expanded top level items, by index.
-    expanded: BTreeMap<u64, ItemRc<Item>>,
+    /// Expanded top level items.
+    expanded: ExpandedChildren<Item>,
 }
 
 pub struct ItemNode<Item> {
@@ -69,47 +70,50 @@ pub struct ItemNode<Item> {
     /// Number of children of this item.
     child_count: u64,
 
-    /// Expanded children of this item, by index.
-    expanded: BTreeMap<u64, ItemRc<Item>>,
+    /// Expanded children of this item.
+    expanded: ExpandedChildren<Item>,
 }
 
-impl<Item> Node<Item> for RootNode<Item> {
-    fn has_expanded(&self, index: u64) -> bool {
-        self.expanded.contains_key(&index)
+impl<Item> ExpandedChildren<Item> {
+    /// Whether the owning node has this child node expanded.
+    fn contains(&self, node: &ItemNode<Item>) -> bool {
+        self.map.contains_key(&node.interval.start)
     }
 
-    fn get_expanded(&self, index: u64) -> Option<ItemRc<Item>> {
-        self.expanded.get(&index).map(Rc::clone)
+    /// Get the expanded child node with this index.
+    fn get(&self, index: u64) -> Option<ItemRc<Item>> {
+        self.map.get(&index).map(Rc::clone)
     }
 
-    fn set_expanded(&mut self, child_rc: &ItemRc<Item>, expanded: bool) {
+    /// Set whether this child of the owning node is expanded.
+    fn set(&mut self, child_rc: &ItemRc<Item>, expanded: bool) {
         let child = child_rc.borrow();
         let start = child.interval.start;
         if expanded {
-            self.expanded.insert(start, child_rc.clone());
+            self.map.insert(start, child_rc.clone());
         } else {
-            self.expanded.remove(&start);
+            self.map.remove(&start);
         }
+    }
+}
+
+impl<Item> Node<Item> for RootNode<Item> {
+    fn expanded_children(&self) -> &ExpandedChildren<Item> {
+        &self.expanded
+    }
+
+    fn expanded_children_mut(&mut self) -> &mut ExpandedChildren<Item> {
+        &mut self.expanded
     }
 }
 
 impl<Item> Node<Item> for ItemNode<Item> {
-    fn has_expanded(&self, index: u64) -> bool {
-        self.expanded.contains_key(&index)
+    fn expanded_children(&self) -> &ExpandedChildren<Item> {
+        &self.expanded
     }
 
-    fn get_expanded(&self, index: u64) -> Option<ItemRc<Item>> {
-        self.expanded.get(&index).map(Rc::clone)
-    }
-
-    fn set_expanded(&mut self, child_rc: &ItemRc<Item>, expanded: bool) {
-        let child = child_rc.borrow();
-        let start = child.interval.start;
-        if expanded {
-            self.expanded.insert(start, child_rc.clone());
-        } else {
-            self.expanded.remove(&start);
-        }
+    fn expanded_children_mut(&mut self) -> &mut ExpandedChildren<Item> {
+        &mut self.expanded
     }
 }
 
@@ -126,10 +130,10 @@ where Item: 'static
 
     pub fn expanded(&self) -> bool {
         match self.parent.upgrade() {
-            Some(parent_rc) => {
-                let parent = parent_rc.borrow();
-                parent.has_expanded(self.interval.start)
-            },
+            Some(parent_rc) => parent_rc
+                .borrow()
+                .expanded_children()
+                .contains(self),
             // Parent is dropped, so node cannot be expanded.
             None => false
         }
@@ -289,7 +293,9 @@ where Item: Copy + Debug + 'static,
             row_count: item_count,
             regions: BTreeMap::new(),
             root: Rc::new(RefCell::new(RootNode {
-                expanded: BTreeMap::new(),
+                expanded: ExpandedChildren {
+                    map: BTreeMap::new(),
+                }
             })),
         };
         model.regions.insert(0, Region {
@@ -308,7 +314,7 @@ where Item: Copy + Debug + 'static,
         -> Result<ItemRc<Item>, ModelError>
     {
         let parent = parent_rc.borrow();
-        Ok(match parent.get_expanded(index) {
+        Ok(match parent.expanded_children().get(index) {
             // If this node is already expanded, use its existing Rc.
             Some(node_rc) => node_rc,
             // Otherwise, create a new node.
@@ -321,7 +327,9 @@ where Item: Copy + Debug + 'static,
                         end: cap.item_end(&item, index)?,
                     },
                     child_count: cap.child_count(&item)?,
-                    expanded: Default::default(),
+                    expanded: ExpandedChildren {
+                        map: BTreeMap::new()
+                    }
                 }))
             }
         })
@@ -1148,7 +1156,10 @@ where Item: Copy + Debug + 'static,
         // Update the parent node's expanded children.
         let node = node_ref.borrow();
         let parent_ref = node.parent.upgrade().ok_or(ParentDropped)?;
-        parent_ref.borrow_mut().set_expanded(node_ref, expanded);
+        parent_ref
+            .borrow_mut()
+            .expanded_children_mut()
+            .set(node_ref, expanded);
 
         println!();
         println!("Region map:");
@@ -1212,7 +1223,8 @@ where Item: Copy + Debug + 'static,
                         // There must already be a node for its parent.
                         let parent_rc: NodeRc<Item> = self.root
                             .borrow()
-                            .get_expanded(parent_index)
+                            .expanded_children()
+                            .get(parent_index)
                             .ok_or(ParentDropped)?;
                         self.node(cap, &parent_rc, child_index, item)?
                     }
