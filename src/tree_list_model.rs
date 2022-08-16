@@ -663,19 +663,16 @@ where Item: Copy + Debug + 'static,
         Ok(match &region.source {
             Children(_) => {
                 // This region is overlapped but self-contained.
-                self.preserve_region(update, start, region, true)?;
-                true
+                self.preserve_region(update, start, region, true)?
             },
             Root() if region.offset >= node_range.end => {
                 // This region is not overlapped.
-                self.preserve_region(update, start, region, false)?;
-                false
+                self.preserve_region(update, start, region, false)?
             },
             Root() if region.length == 1 => {
                 // This region includes only a single root item, and does
                 // not need to be translated to an interleaved one.
-                self.preserve_region(update, start, region, true)?;
-                true
+                self.preserve_region(update, start, region, true)?
             },
             Root() if region.offset + region.length <= node_range.end => {
                 // This region is fully overlapped by the new node.
@@ -731,8 +728,7 @@ where Item: Copy + Debug + 'static,
             },
             Interleaved(_, range) if range.start >= node_range.end => {
                 // This region is not overlapped.
-                self.preserve_region(update, start, region, false)?;
-                false
+                self.preserve_region(update, start, region, false)?
             },
             Interleaved(expanded, range) if range.end <= node_range.end => {
                 // This region is fully overlapped by the new node.
@@ -763,8 +759,7 @@ where Item: Copy + Debug + 'static,
                     self.count_within(expanded, &first_range)?;
                 if region.offset >= split_offset {
                     // This region begins after the split, so isn't overlapped.
-                    self.preserve_region(update, start, region, false)?;
-                    false
+                    self.preserve_region(update, start, region, false)?
                 } else {
                     // Split the region into overlapped and unoverlapped parts.
                     let (added_before_offset, added_after_offset) =
@@ -811,18 +806,15 @@ where Item: Copy + Debug + 'static,
         Ok(match &region.source {
             Root() if region.offset >= node_range.end => {
                 // This region is not overlapped.
-                self.preserve_region(update, start, region, false)?;
-                false
+                self.preserve_region(update, start, region, false)?
             },
             Interleaved(_, range) if range.start >= node_range.end => {
                 // This region is not overlapped.
-                self.preserve_region(update, start, region, false)?;
-                false
+                self.preserve_region(update, start, region, false)?
             },
             Children(_) | Root() => {
                 // This region is overlapped but self-contained.
-                self.preserve_region(update, start, region, true)?;
-                true
+                self.preserve_region(update, start, region, true)?
             },
             Interleaved(expanded, range) => {
                 // This region is overlapped. Replace with a new one.
@@ -884,7 +876,7 @@ where Item: Copy + Debug + 'static,
                        start: u64,
                        region: &Region<Item>,
                        include_as_changed: bool)
-        -> Result<(), ModelError>
+        -> Result<bool, ModelError>
     {
         let new_position = start
             + update.rows_added
@@ -896,7 +888,7 @@ where Item: Copy + Debug + 'static,
             update.rows_changed += region.length;
         }
 
-        Ok(())
+        Ok(include_as_changed)
     }
 
     fn replace_region(&mut self,
