@@ -661,13 +661,17 @@ where Item: Copy + Debug + 'static,
         let node_range = self.range(node_ref);
 
         Ok(match &region.source {
-            Children(_) => {
-                // This region is overlapped but self-contained.
-                self.preserve_region(update, start, region, true)?
-            },
             Root() if region.offset >= node_range.end => {
                 // This region is not overlapped.
                 self.preserve_region(update, start, region, false)?
+            },
+            Interleaved(_, range) if range.start >= node_range.end => {
+                // This region is not overlapped.
+                self.preserve_region(update, start, region, false)?
+            },
+            Children(_) => {
+                // This region is overlapped but self-contained.
+                self.preserve_region(update, start, region, true)?
             },
             Root() if region.length == 1 => {
                 // This region includes only a single root item, and does
@@ -725,10 +729,6 @@ where Item: Copy + Debug + 'static,
                 )?;
                 // No longer overlapping.
                 false
-            },
-            Interleaved(_, range) if range.start >= node_range.end => {
-                // This region is not overlapped.
-                self.preserve_region(update, start, region, false)?
             },
             Interleaved(expanded, range) if range.end <= node_range.end => {
                 // This region is fully overlapped by the new node.
