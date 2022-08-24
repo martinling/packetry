@@ -743,8 +743,8 @@ where Item: Copy + Debug + 'static,
                 // Split it into overlapped and unoverlapped parts.
                 let expanded = vec![node_ref.clone()];
                 let range = region.offset..node_range.end;
+                let changed = range.len() - 1;
                 let added = self.count_within(&expanded, &range)?;
-                let changed = range.len();
                 self.partial_overlap(update, start, region,
                     vec![Region {
                         source: Root(),
@@ -754,7 +754,7 @@ where Item: Copy + Debug + 'static,
                     Region {
                         source: Interleaved(expanded, range),
                         offset: 0,
-                        length: changed - 1 + added
+                        length: changed + added
                     }],
                     vec![Region {
                         source: Root(),
