@@ -359,11 +359,13 @@ where Item: Copy + Debug + 'static,
                        expanded: &[ItemRc<Item>],
                        range: &Range<u64>,
                        node_ref: &ItemRc<Item>,
-                       offset: u64)
+                       mut offset: u64)
         -> Result<u64, ModelError>
     {
         if offset == 0 {
-            return Ok(0)
+            return Ok(0);
+        } else {
+            offset -= 1;
         }
         use SearchResult::*;
         let node = node_ref.borrow();
@@ -684,6 +686,28 @@ where Item: Copy + Debug + 'static,
                 // not need to be translated to an interleaved one.
                 self.preserve_region(update, start, region, true)?
             },
+            Root() if region.offset + region.length == node_range.end &&
+                node_range.end == self.item_count =>
+            {
+                // This region is fully overlapped and runs to the end
+                // of the model, not just the last item.
+                let expanded = vec![node_ref.clone()];
+                let range = region.offset..self.item_count;
+                let added = self.count_within(&expanded, &range)?;
+                self.replace_region(update, start, region,
+                    vec![Region {
+                        source: Root(),
+                        offset: region.offset,
+                        length: 1,
+                    },
+                    Region {
+                        source: Interleaved(expanded, range),
+                        offset: 0,
+                        length: region.length + 1 + added,
+                    }]
+                )?;
+                true
+            }
             Root() if region.offset + region.length <= node_range.end => {
                 // This region is fully overlapped by the new node.
                 // Replace with a new interleaved region.
@@ -826,21 +850,20 @@ where Item: Copy + Debug + 'static,
                 // This region is overlapped. Replace with a new one.
                 let mut less_expanded = expanded.to_vec();
                 less_expanded.retain(|rc| !Rc::ptr_eq(rc, node_ref));
-                let (removed_before_offset, removed_after_offset) =
-                    self.count_around_offset(
-                        expanded, range, node_ref,
-                        region.offset,
-                        region.offset + region.length)?;
                 let new_region = if less_expanded.is_empty() {
                     // This node was the last expanded one in this region.
                     Region {
                         source: Root(),
-                        offset: range.start +
-                            region.offset - removed_before_offset,
-                        length: region.length - removed_after_offset,
+                        offset: range.start + 1,
+                        length: range.len() - 1,
                     }
                 } else {
                     // There are other nodes expanded in this region.
+                    let (removed_before_offset, removed_after_offset) =
+                        self.count_around_offset(
+                            expanded, range, node_ref,
+                            region.offset,
+                            region.offset + region.length)?;
                     Region {
                         source: Interleaved(less_expanded, range.clone()),
                         offset: region.offset - removed_before_offset,
