@@ -355,31 +355,31 @@ where Item: Copy + Debug + 'static,
         })
     }
 
-    fn count_to_offset(&self,
-                       expanded: &[ItemRc<Item>],
-                       range: &Range<u64>,
-                       node_ref: &ItemRc<Item>,
-                       offset: u64)
+    fn count_to_item(&self,
+                     expanded: &[ItemRc<Item>],
+                     range: &Range<u64>,
+                     to_index: u64,
+                     node_ref: &ItemRc<Item>)
         -> Result<u64, ModelError>
     {
         use SearchResult::*;
         let node = node_ref.borrow();
-        let index = node.interval.start;
+        let item_index = node.interval.start;
         let item = &node.item;
         let mut expanded = self.adapt_expanded(expanded);
         let mut cap = self.capture.lock().or(Err(LockError))?;
-        let search_result = cap.find_child(&mut expanded, range, offset);
+        let search_result = cap.find_child(&mut expanded, range, to_index);
         Ok(match search_result {
-            Ok(TopLevelItem(item_index, _)) => {
-                let range_to_item = range.start..item_index;
-                cap.count_within(index, item, &range_to_item)?
+            Ok(TopLevelItem(found_index, _)) => {
+                let range_to_item = range.start..found_index;
+                cap.count_within(item_index, item, &range_to_item)?
             },
             Ok(NextLevelItem(span_index, .., child)) => {
                 let range_to_span = range.start..span_index;
-                cap.count_within(index, item, &range_to_span)? +
-                    cap.count_before(index, item, span_index, &child)?
+                cap.count_within(item_index, item, &range_to_span)? +
+                    cap.count_before(item_index, item, span_index, &child)?
             },
-            Err(_) => cap.count_within(index, item, range)?
+            Err(_) => cap.count_within(item_index, item, range)?
         })
     }
 
@@ -396,13 +396,13 @@ where Item: Copy + Debug + 'static,
             if offset == 0 {
                 0
             } else {
-                self.count_to_offset(expanded, range, node_ref, offset - 1)?
+                self.count_to_item(expanded, range, offset - 1, node_ref)?
             };
         let rows_before_end =
             if end == length {
                 self.count_within(&[node_ref.clone()], range)?
             } else {
-                self.count_to_offset(expanded, range, node_ref, end - 1)?
+                self.count_to_item(expanded, range, end - 1, node_ref)?
             };
         let rows_after_offset = rows_before_end - rows_before_offset;
         Ok((rows_before_offset, rows_after_offset))
