@@ -622,9 +622,12 @@ where Item: Copy + Debug + 'static,
                 "Unable to collapse root region"))),
             // Non-interleaved region is just removed.
             Children(_) => {
-                let (_, region) = following_regions.next().unwrap();
-                println!();
-                println!("Removing: {:?}", region);
+                let (_, _region) = following_regions.next().unwrap();
+                #[cfg(feature="debug-region-map")]
+                {
+                    println!();
+                    println!("Removing: {:?}", _region);
+                }
                 ModelUpdate {
                     rows_added: 0,
                     rows_removed: node_ref.borrow().child_count,
@@ -957,12 +960,15 @@ where Item: Copy + Debug + 'static,
             },
         };
 
-        println!();
-        println!("Replacing: {:?}", region);
-        for new_region in new_regions.iter() {
-            println!("     with: {:?}", new_region);
+        #[cfg(feature="debug-region-map")]
+        {
+            println!();
+            println!("Replacing: {:?}", region);
+            for new_region in new_regions.iter() {
+                println!("     with: {:?}", new_region);
+            }
+            println!("           {:?}", effect);
         }
-        println!("           {:?}", effect);
 
         let mut position = start
             + update.rows_added
@@ -1005,15 +1011,18 @@ where Item: Copy + Debug + 'static,
             rows_changed: region.length - unchanged_length,
         };
 
-        println!();
-        println!("Splitting: {:?}", region);
-        for changed_region in changed_regions.iter() {
-            println!("         : {:?}", changed_region);
+        #[cfg(feature="debug-region-map")]
+        {
+            println!();
+            println!("Splitting: {:?}", region);
+            for changed_region in changed_regions.iter() {
+                println!("         : {:?}", changed_region);
+            }
+            for unchanged_region in unchanged_regions.iter() {
+                println!("         : {:?}", unchanged_region);
+            }
+            println!("           {:?}", effect);
         }
-        for unchanged_region in unchanged_regions.iter() {
-            println!("         : {:?}", unchanged_region);
-        }
-        println!("           {:?}", effect);
 
         let mut position = start + update.rows_added - update.rows_removed;
         for region in changed_regions
@@ -1062,16 +1071,19 @@ where Item: Copy + Debug + 'static,
             rows_changed,
         };
 
-        println!();
-        println!("Splitting: {:?}", parent);
-        for region in parts_before.iter() {
-            println!("   before: {:?}", region);
+        #[cfg(feature="debug-region-map")]
+        {
+            println!();
+            println!("Splitting: {:?}", parent);
+            for region in parts_before.iter() {
+                println!("   before: {:?}", region);
+            }
+            println!("      new: {:?}", new_region);
+            for region in parts_after.iter().filter(|region| region.length > 0) {
+                println!("    after: {:?}", region);
+            }
+            println!("           {:?}", update);
         }
-        println!("      new: {:?}", new_region);
-        for region in parts_after.iter().filter(|region| region.length > 0) {
-            println!("    after: {:?}", region);
-        }
-        println!("           {:?}", update);
 
         let interleaved = matches!(&new_region.source, Interleaved(..));
         let new_position = parent_start + length_before;
@@ -1109,10 +1121,13 @@ where Item: Copy + Debug + 'static,
 
     fn merge_regions(&mut self) {
 
-        println!();
-        println!("Before merge:");
-        for (start, region) in self.regions.iter() {
-            println!("{}: {:?}", start, region);
+        #[cfg(feature="debug-region-map")]
+        {
+            println!();
+            println!("Before merge:");
+            for (start, region) in self.regions.iter() {
+                println!("{}: {:?}", start, region);
+            }
         }
 
         self.regions = self.regions
@@ -1121,10 +1136,13 @@ where Item: Copy + Debug + 'static,
             .coalesce(|(start_a, region_a), (start_b, region_b)|
                 match Region::merge(&region_a, &region_b) {
                     Some(region_c) => {
-                        println!();
-                        println!("Merging: {:?}", region_a);
-                        println!("    and: {:?}", region_b);
-                        println!("   into: {:?}", region_c);
+                        #[cfg(feature="debug-region-map")]
+                        {
+                            println!();
+                            println!("Merging: {:?}", region_a);
+                            println!("    and: {:?}", region_b);
+                            println!("   into: {:?}", region_c);
+                        }
                         Ok((start_a, region_c))
                     },
                     None => Err(((start_a, region_a), (start_b, region_b)))
@@ -1187,10 +1205,13 @@ where Item: Copy + Debug + 'static,
             .expanded_children_mut()
             .set(node_ref, expanded);
 
-        println!();
-        println!("Region map:");
-        for (start, region) in self.regions.iter() {
-            println!("{}: {:?}", start, region);
+        #[cfg(feature="debug-region-map")]
+        {
+            println!();
+            println!("Region map:");
+            for (start, region) in self.regions.iter() {
+                println!("{}: {:?}", start, region);
+            }
         }
 
         Ok(update)
