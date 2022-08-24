@@ -697,6 +697,7 @@ where Item: Copy + Debug + 'static,
                 // of the model, not just the last item.
                 let expanded = vec![node_ref.clone()];
                 let range = region.offset..self.item_count;
+                let changed = range.len() - 1;
                 let added = self.count_within(&expanded, &range)?;
                 self.replace_region(update, start, region,
                     vec![Region {
@@ -707,7 +708,7 @@ where Item: Copy + Debug + 'static,
                     Region {
                         source: Interleaved(expanded, range),
                         offset: 0,
-                        length: region.length + 1 + added,
+                        length: changed + added,
                     }]
                 )?;
                 true
