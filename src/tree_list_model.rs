@@ -359,14 +359,9 @@ where Item: Copy + Debug + 'static,
                        expanded: &[ItemRc<Item>],
                        range: &Range<u64>,
                        node_ref: &ItemRc<Item>,
-                       mut offset: u64)
+                       offset: u64)
         -> Result<u64, ModelError>
     {
-        if offset == 0 {
-            return Ok(0);
-        } else {
-            offset -= 1;
-        }
         use SearchResult::*;
         let node = node_ref.borrow();
         let index = node.interval.start;
@@ -396,10 +391,19 @@ where Item: Copy + Debug + 'static,
                            end: u64)
         -> Result<(u64, u64), ModelError>
     {
+        let length = range.len() - 1 + self.count_within(expanded, range)?;
         let rows_before_offset =
-            self.count_to_offset(expanded, range, node_ref, offset)?;
+            if offset == 0 {
+                0
+            } else {
+                self.count_to_offset(expanded, range, node_ref, offset - 1)?
+            };
         let rows_before_end =
-            self.count_to_offset(expanded, range, node_ref, end)?;
+            if end == length {
+                self.count_within(&[node_ref.clone()], range)?
+            } else {
+                self.count_to_offset(expanded, range, node_ref, end - 1)?
+            };
         let rows_after_offset = rows_before_end - rows_before_offset;
         Ok((rows_before_offset, rows_after_offset))
     }
