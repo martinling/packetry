@@ -118,8 +118,13 @@ impl<Item> Node<Item> for ItemNode<Item> {
 }
 
 impl<Item> ItemNode<Item>
-where Item: 'static
+where Item: 'static + Copy
 {
+    #[cfg(feature="record-ui-test")]
+    pub fn item(&self) -> Item {
+        self.item
+    }
+
     fn parent_is(&self, node_ref: &ItemRc<Item>)
         -> Result<bool, ModelError>
     {

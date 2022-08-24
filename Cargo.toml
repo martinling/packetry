@@ -21,6 +21,9 @@ humansize = "1.1.1"
 bisection = "0.1.0"
 derive_more = "0.99.17"
 itertools = "0.10.3"
+serde = { version = "1.0.136", optional = true, features = ["derive"] }
+serde_json = { version = "1.0.85", optional = true }
 
 [features]
 debug-region-map = []
+record-ui-test = ["serde", "serde_json"]
