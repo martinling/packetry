@@ -766,8 +766,8 @@ where Item: Copy + Debug + 'static,
                     }],
                     vec![Region {
                         source: Root(),
-                        offset: region.offset + changed,
-                        length: region.length - changed,
+                        offset: region.offset + changed + 1,
+                        length: region.length - changed - 1,
                     }]
                 )?;
                 // No longer overlapping.
