@@ -1,10 +1,20 @@
-use std::cell::RefCell;
 use std::fmt::Debug;
 use std::fs::File;
-use std::io::Write;
 use std::path::Path;
-use std::rc::Rc;
 use serde::{Serialize, Deserialize};
+
+#[cfg(feature="record-ui-test")]
+use {
+    std::cell::RefCell,
+    std::rc::Rc,
+    std::io::Write,
+};
+
+#[cfg(test)]
+use {
+    std::io::BufReader,
+    serde_json::Deserializer,
+};
 
 use gtk::prelude::*;
 use gtk::glib::Object;
@@ -25,6 +35,7 @@ struct UIState {
     items: Vec<String>
 }
 
+#[cfg(feature="record-ui-test")]
 pub fn create_logfile(dir: &Path, name: &str) -> Rc<RefCell<File>> {
     Rc::new(RefCell::new(
         File::options()
@@ -37,6 +48,7 @@ pub fn create_logfile(dir: &Path, name: &str) -> Rc<RefCell<File>> {
             .expect("Failed to open UI log file")))
 }
 
+#[cfg(feature="record-ui-test")]
 pub fn log_action<Model, RowData, Item>(
     model: &Model,
     logfile: &Rc<RefCell<File>>,
@@ -71,4 +83,48 @@ where
                 .expect("Failed to serialise UI state")
                 .as_bytes())
         .expect("Failed to write to UI log");
+}
+
+#[cfg(test)]
+pub fn check_replay<Model, RowData, Item>(
+    model: &Model,
+    logfile: &Path)
+where
+    Model: GenericModel<Item> + IsA<ListModel>,
+    RowData: GenericRowData<Item> + IsA<Object>,
+    Item: 'static + Copy + Debug
+{
+    let file = File::open(logfile).unwrap();
+    let mut reader = BufReader::new(file);
+    let deserializer = Deserializer::from_reader(&mut reader);
+    for state in deserializer.into_iter::<UIState>() {
+        let state = state.unwrap();
+        use UIAction::*;
+        match state.action {
+            Startup() => {},
+            SetExpanded(position, expanded) => {
+                let node = model
+                    .item(position)
+                    .expect("Failed to load model item")
+                    .downcast::<RowData>()
+                    .expect("Model item was not RowData.")
+                    .node()
+                    .expect("RowData has no node");
+                model.set_expanded(&node, position, expanded)
+                    .expect("Failed to expand/collapse node");
+            }
+        };
+        for i in 0..model.n_items() {
+            let item = model
+                .item(i)
+                .expect("Failed to load model item")
+                .downcast::<RowData>()
+                .expect("Model item was not RowData.")
+                .node()
+                .expect("RowData has no node")
+                .borrow()
+                .item();
+            assert!(format!("{:?}", item) == state.items[i as usize]);
+        }
+    }
 }

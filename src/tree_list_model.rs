@@ -120,7 +120,7 @@ impl<Item> Node<Item> for ItemNode<Item> {
 impl<Item> ItemNode<Item>
 where Item: 'static + Copy
 {
-    #[cfg(feature="record-ui-test")]
+    #[cfg(any(test, feature="record-ui-test"))]
     pub fn item(&self) -> Item {
         self.item
     }
