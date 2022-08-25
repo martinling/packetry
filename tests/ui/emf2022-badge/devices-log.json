@@ -1,0 +1,310 @@
+{
+  "action": {
+    "Startup": []
+  },
+  "items": [
+    "Device(1)",
+    "Device(2)"
+  ]
+}{
+  "action": {
+    "SetExpanded": [
+      0,
+      true
+    ]
+  },
+  "items": [
+    "Device(1)",
+    "DeviceDescriptor(1)",
+    "Configuration(1, ConfigNum(1))",
+    "Device(2)"
+  ]
+}{
+  "action": {
+    "SetExpanded": [
+      3,
+      true
+    ]
+  },
+  "items": [
+    "Device(1)",
+    "DeviceDescriptor(1)",
+    "Configuration(1, ConfigNum(1))",
+    "Device(2)",
+    "DeviceDescriptor(2)",
+    "Configuration(2, ConfigNum(1))"
+  ]
+}{
+  "action": {
+    "SetExpanded": [
+      2,
+      true
+    ]
+  },
+  "items": [
+    "Device(1)",
+    "DeviceDescriptor(1)",
+    "Configuration(1, ConfigNum(1))",
+    "ConfigurationDescriptor(1, ConfigNum(1))",
+    "Interface(1, ConfigNum(1), InterfaceNum(0))",
+    "Interface(1, ConfigNum(1), InterfaceNum(1))",
+    "Interface(1, ConfigNum(1), InterfaceNum(2))",
+    "Device(2)",
+    "DeviceDescriptor(2)",
+    "Configuration(2, ConfigNum(1))"
+  ]
+}{
+  "action": {
+    "SetExpanded": [
+      5,
+      true
+    ]
+  },
+  "items": [
+    "Device(1)",
+    "DeviceDescriptor(1)",
+    "Configuration(1, ConfigNum(1))",
+    "ConfigurationDescriptor(1, ConfigNum(1))",
+    "Interface(1, ConfigNum(1), InterfaceNum(0))",
+    "Interface(1, ConfigNum(1), InterfaceNum(1))",
+    "InterfaceDescriptor(1, ConfigNum(1), InterfaceNum(1))",
+    "EndpointDescriptor(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(0))",
+    "EndpointDescriptor(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1))",
+    "Interface(1, ConfigNum(1), InterfaceNum(2))",
+    "Device(2)",
+    "DeviceDescriptor(2)",
+    "Configuration(2, ConfigNum(1))"
+  ]
+}{
+  "action": {
+    "SetExpanded": [
+      8,
+      true
+    ]
+  },
+  "items": [
+    "Device(1)",
+    "DeviceDescriptor(1)",
+    "Configuration(1, ConfigNum(1))",
+    "ConfigurationDescriptor(1, ConfigNum(1))",
+    "Interface(1, ConfigNum(1), InterfaceNum(0))",
+    "Interface(1, ConfigNum(1), InterfaceNum(1))",
+    "InterfaceDescriptor(1, ConfigNum(1), InterfaceNum(1))",
+    "EndpointDescriptor(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(0))",
+    "EndpointDescriptor(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(0))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(1))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(2))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(3))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(4))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(5))",
+    "Interface(1, ConfigNum(1), InterfaceNum(2))",
+    "Device(2)",
+    "DeviceDescriptor(2)",
+    "Configuration(2, ConfigNum(1))"
+  ]
+}{
+  "action": {
+    "SetExpanded": [
+      18,
+      true
+    ]
+  },
+  "items": [
+    "Device(1)",
+    "DeviceDescriptor(1)",
+    "Configuration(1, ConfigNum(1))",
+    "ConfigurationDescriptor(1, ConfigNum(1))",
+    "Interface(1, ConfigNum(1), InterfaceNum(0))",
+    "Interface(1, ConfigNum(1), InterfaceNum(1))",
+    "InterfaceDescriptor(1, ConfigNum(1), InterfaceNum(1))",
+    "EndpointDescriptor(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(0))",
+    "EndpointDescriptor(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(0))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(1))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(2))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(3))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(4))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(5))",
+    "Interface(1, ConfigNum(1), InterfaceNum(2))",
+    "Device(2)",
+    "DeviceDescriptor(2)",
+    "Configuration(2, ConfigNum(1))",
+    "ConfigurationDescriptor(2, ConfigNum(1))",
+    "Interface(2, ConfigNum(1), InterfaceNum(0))",
+    "Interface(2, ConfigNum(1), InterfaceNum(1))",
+    "Interface(2, ConfigNum(1), InterfaceNum(2))"
+  ]
+}{
+  "action": {
+    "SetExpanded": [
+      19,
+      true
+    ]
+  },
+  "items": [
+    "Device(1)",
+    "DeviceDescriptor(1)",
+    "Configuration(1, ConfigNum(1))",
+    "ConfigurationDescriptor(1, ConfigNum(1))",
+    "Interface(1, ConfigNum(1), InterfaceNum(0))",
+    "Interface(1, ConfigNum(1), InterfaceNum(1))",
+    "InterfaceDescriptor(1, ConfigNum(1), InterfaceNum(1))",
+    "EndpointDescriptor(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(0))",
+    "EndpointDescriptor(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(0))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(1))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(2))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(3))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(4))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(5))",
+    "Interface(1, ConfigNum(1), InterfaceNum(2))",
+    "Device(2)",
+    "DeviceDescriptor(2)",
+    "Configuration(2, ConfigNum(1))",
+    "ConfigurationDescriptor(2, ConfigNum(1))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(0))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(1))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(2))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(3))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(4))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(5))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(6))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(7))",
+    "Interface(2, ConfigNum(1), InterfaceNum(0))",
+    "Interface(2, ConfigNum(1), InterfaceNum(1))",
+    "Interface(2, ConfigNum(1), InterfaceNum(2))"
+  ]
+}{
+  "action": {
+    "SetExpanded": [
+      29,
+      true
+    ]
+  },
+  "items": [
+    "Device(1)",
+    "DeviceDescriptor(1)",
+    "Configuration(1, ConfigNum(1))",
+    "ConfigurationDescriptor(1, ConfigNum(1))",
+    "Interface(1, ConfigNum(1), InterfaceNum(0))",
+    "Interface(1, ConfigNum(1), InterfaceNum(1))",
+    "InterfaceDescriptor(1, ConfigNum(1), InterfaceNum(1))",
+    "EndpointDescriptor(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(0))",
+    "EndpointDescriptor(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(0))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(1))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(2))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(3))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(4))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(5))",
+    "Interface(1, ConfigNum(1), InterfaceNum(2))",
+    "Device(2)",
+    "DeviceDescriptor(2)",
+    "Configuration(2, ConfigNum(1))",
+    "ConfigurationDescriptor(2, ConfigNum(1))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(0))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(1))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(2))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(3))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(4))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(5))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(6))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(7))",
+    "Interface(2, ConfigNum(1), InterfaceNum(0))",
+    "Interface(2, ConfigNum(1), InterfaceNum(1))",
+    "InterfaceDescriptor(2, ConfigNum(1), InterfaceNum(1))",
+    "EndpointDescriptor(2, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(0))",
+    "EndpointDescriptor(2, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1))",
+    "Interface(2, ConfigNum(1), InterfaceNum(2))"
+  ]
+}{
+  "action": {
+    "SetExpanded": [
+      30,
+      true
+    ]
+  },
+  "items": [
+    "Device(1)",
+    "DeviceDescriptor(1)",
+    "Configuration(1, ConfigNum(1))",
+    "ConfigurationDescriptor(1, ConfigNum(1))",
+    "Interface(1, ConfigNum(1), InterfaceNum(0))",
+    "Interface(1, ConfigNum(1), InterfaceNum(1))",
+    "InterfaceDescriptor(1, ConfigNum(1), InterfaceNum(1))",
+    "EndpointDescriptor(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(0))",
+    "EndpointDescriptor(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(0))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(1))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(2))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(3))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(4))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(5))",
+    "Interface(1, ConfigNum(1), InterfaceNum(2))",
+    "Device(2)",
+    "DeviceDescriptor(2)",
+    "Configuration(2, ConfigNum(1))",
+    "ConfigurationDescriptor(2, ConfigNum(1))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(0))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(1))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(2))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(3))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(4))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(5))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(6))",
+    "ConfigurationDescriptorField(2, ConfigNum(1), ConfigField(7))",
+    "Interface(2, ConfigNum(1), InterfaceNum(0))",
+    "Interface(2, ConfigNum(1), InterfaceNum(1))",
+    "InterfaceDescriptor(2, ConfigNum(1), InterfaceNum(1))",
+    "InterfaceDescriptorField(2, ConfigNum(1), InterfaceNum(1), InterfaceField(0))",
+    "InterfaceDescriptorField(2, ConfigNum(1), InterfaceNum(1), InterfaceField(1))",
+    "InterfaceDescriptorField(2, ConfigNum(1), InterfaceNum(1), InterfaceField(2))",
+    "InterfaceDescriptorField(2, ConfigNum(1), InterfaceNum(1), InterfaceField(3))",
+    "InterfaceDescriptorField(2, ConfigNum(1), InterfaceNum(1), InterfaceField(4))",
+    "InterfaceDescriptorField(2, ConfigNum(1), InterfaceNum(1), InterfaceField(5))",
+    "InterfaceDescriptorField(2, ConfigNum(1), InterfaceNum(1), InterfaceField(6))",
+    "InterfaceDescriptorField(2, ConfigNum(1), InterfaceNum(1), InterfaceField(7))",
+    "InterfaceDescriptorField(2, ConfigNum(1), InterfaceNum(1), InterfaceField(8))",
+    "EndpointDescriptor(2, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(0))",
+    "EndpointDescriptor(2, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1))",
+    "Interface(2, ConfigNum(1), InterfaceNum(2))"
+  ]
+}{
+  "action": {
+    "SetExpanded": [
+      16,
+      false
+    ]
+  },
+  "items": [
+    "Device(1)",
+    "DeviceDescriptor(1)",
+    "Configuration(1, ConfigNum(1))",
+    "ConfigurationDescriptor(1, ConfigNum(1))",
+    "Interface(1, ConfigNum(1), InterfaceNum(0))",
+    "Interface(1, ConfigNum(1), InterfaceNum(1))",
+    "InterfaceDescriptor(1, ConfigNum(1), InterfaceNum(1))",
+    "EndpointDescriptor(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(0))",
+    "EndpointDescriptor(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(0))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(1))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(2))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(3))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(4))",
+    "EndpointDescriptorField(1, ConfigNum(1), InterfaceNum(1), InterfaceEpNum(1), EndpointField(5))",
+    "Interface(1, ConfigNum(1), InterfaceNum(2))",
+    "Device(2)"
+  ]
+}{
+  "action": {
+    "SetExpanded": [
+      0,
+      false
+    ]
+  },
+  "items": [
+    "Device(1)",
+    "Device(2)"
+  ]
+}
