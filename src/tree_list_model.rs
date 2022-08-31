@@ -1252,14 +1252,8 @@ where Item: Copy + Debug + 'static,
             },
             // Region requiring interleaved search.
             Interleaved(expanded_rcs, range) => {
-                // Prepare an iterator of expanded intervals to pass to the
-                // search, which only requires the start and item.
-                let mut expanded = expanded_rcs.iter().map(|node_rc| {
-                    let node = node_rc.borrow();
-                    (node.interval.start, node.item)
-                });
-
                 // Run the interleaved search.
+                let mut expanded = self.adapt_expanded(expanded_rcs);
                 let search_result =
                     cap.find_child(&mut expanded, range, index)?;
 
