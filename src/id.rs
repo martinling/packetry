@@ -9,6 +9,20 @@ pub struct Id<T> {
    pub value: u64
 }
 
+impl<T> Eq for Id<T> {}
+
+impl<T> PartialOrd for Id<T> {
+   fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+      self.value.partial_cmp(&other.value)
+   }
+}
+
+impl<T> Ord for Id<T> {
+   fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+      self.value.cmp(&other.value)
+   }
+}
+
 impl<T> Display for Id<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>)
         -> Result<(), std::fmt::Error>

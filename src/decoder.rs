@@ -784,7 +784,8 @@ impl<'cap> Decoder<'cap> {
                     // We just added a transaction, that shouldn't be included.
                     transaction_count -= 1;
                 }
-                ep_traf.progress_index.push(transaction_count)?;
+                ep_traf.progress_index.push(
+                    EndpointTransactionId::from_u64(transaction_count))?;
             }
         }
 

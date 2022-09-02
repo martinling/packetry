@@ -1,5 +1,6 @@
 use std::ops::Range;
 use std::num::TryFromIntError;
+use std::ptr;
 
 use crate::id::{Id, HasLength};
 use crate::interval::IntervalEnd;
@@ -40,7 +41,6 @@ pub type TrafficItemId = Id<TransferId>;
 pub type DeviceId = Id<Device>;
 pub type EndpointId = Id<Endpoint>;
 pub type EndpointByteCount = u64;
-pub type EndpointTransactionCount = u64;
 pub type TrafficItemIdOffset = u64;
 
 #[derive(Copy, Clone, Debug)]
@@ -153,7 +153,7 @@ pub struct EndpointTraffic {
     pub data_index: HybridIndex<EndpointTransactionId, EndpointByteCount>,
     pub total_data: EndpointByteCount,
     pub first_item_id: Option<TrafficItemId>,
-    pub progress_index: HybridIndex<TrafficItemIdOffset, EndpointTransactionCount>,
+    pub progress_index: HybridIndex<TrafficItemIdOffset, EndpointTransactionId>,
     pub end_index: HybridIndex<EndpointTransferId, TrafficItemId>,
 }
 
@@ -284,7 +284,7 @@ pub fn fmt_vec<T>(vec: &FileVec<T>) -> String
 }
 
 pub fn fmt_index<I, T>(idx: &HybridIndex<I, T>) -> String
-    where I: Number, T: Number + Copy
+    where I: Number, T: Number + Copy + Ord
 {
     format!("{} values in {} entries, {}",
             fmt_count(idx.len()),
@@ -680,8 +680,10 @@ impl Capture {
                 start_item_id,
                 transfer_id: *transfer_id,
                 endpoint_id,
-                count_range: 0..0,
-                estimated_count: 0,
+                transaction_range:
+                    ep_traf.transfer_index.target_range(
+                        entry.transfer_id(),
+                        ep_traf.transaction_ids.len())?,
             })
         } else {
             Err(IndexError(format!("Item {:?} is not a transfer", item)))
@@ -689,7 +691,7 @@ impl Capture {
     }
 
     fn transfers(&mut self,
-                        expanded: &mut dyn Iterator<Item=(u64, TrafficItem)>)
+                expanded: &mut dyn Iterator<Item=(u64, TrafficItem)>)
         -> Result<Vec<Transfer>, CaptureError>
     {
         expanded
@@ -738,8 +740,7 @@ struct Transfer {
     start_item_id: TrafficItemId,
     transfer_id: TransferId,
     endpoint_id: EndpointId,
-    count_range: Range<EndpointTransactionCount>,
-    estimated_count: EndpointTransactionCount,
+    transaction_range: Range<EndpointTransactionId>,
 }
 
 impl ItemSource<TrafficItem> for Capture {
@@ -843,12 +844,12 @@ impl ItemSource<TrafficItem> for Capture {
         let end_item_id = TrafficItemId::from_u64(region.end);
         let start_offset = start_item_id - transfer.ep_first_item_id;
         let end_offset = end_item_id - transfer.ep_first_item_id;
-        let start_count = ep_traf.progress_index.get(start_offset)?;
+        let start_count = ep_traf.progress_index.get(start_offset)?.value;
         let end_count =
             if end_offset >= ep_traf.progress_index.len() {
                 ep_traf.transaction_ids.len()
             } else {
-                ep_traf.progress_index.get(end_offset)?
+                ep_traf.progress_index.get(end_offset)?.value
             };
         Ok(end_count - start_count)
     }
@@ -866,15 +867,13 @@ impl ItemSource<TrafficItem> for Capture {
         let ep_traf = self.endpoint_traffic(transfer.endpoint_id)?;
         let span_item_id = TrafficItemId::from_u64(span_index);
         let span_offset = span_item_id - transfer.ep_first_item_id;
-        let count_range = ep_traf.progress_index.target_range(
+        let transaction_range = ep_traf.progress_index.target_range(
             span_offset, ep_traf.transaction_ids.len())?;
-        let transaction_count = count_range.len();
+        let transaction_count = transaction_range.len();
         if let TrafficItem::Transaction(_, transaction_id) = child {
             let expected = transaction_id.value;
             for index in 0..transaction_count {
-                let ep_transaction_id =
-                    EndpointTransactionId::from_u64(
-                        count_range.start + index);
+                let ep_transaction_id = transaction_range.start + index;
                 let id = ep_traf.transaction_ids.get(ep_transaction_id)?;
                 if id.value >= expected {
                     return Ok(index)
@@ -913,11 +912,11 @@ impl ItemSource<TrafficItem> for Capture {
                 // Find the transaction counts for this transfer at the
                 // beginning and end of this span.
                 let item_offset = span_item_id - transfer.ep_first_item_id;
-                transfer.count_range =
+                transfer.transaction_range =
                     ep_traf.progress_index.target_range(
                         item_offset, ep_traf.transaction_ids.len())?;
                 // Add to the total count for this span.
-                total_transactions += transfer.count_range.len();
+                total_transactions += transfer.transaction_range.len();
             }
             // If the index is within this span, proceed to the next stage.
             if index < total_transactions {
@@ -948,91 +947,129 @@ impl ItemSource<TrafficItem> for Capture {
                 index, total_transactions)));
         }
 
-        // Discard any transfers without transactions in this span.
-        transfers.retain(|transfer|
-            transfer.estimated_count < transfer.count_range.len());
+        // Now we have identified the correct span. Find the transaction with
+        // the remaining index from among the active transfers.
 
-        // Now we have identified the correct span, and need to find the
-        // transaction with the remaining index from the active transfers.
-        //
-        // Initial simple implementation. Get the next transactions for each
-        // active transfer, choose the earliest, increment the estimate for
-        // that transfer and repeat. This will take O(n) time to find the
-        // transaction with the given index.
-        //
-        // This should be replaced with an O(log n) solution that bisects
-        // the possible counts for each transfer.
+        loop {
+            // Exclude transfers with no remaining transactions.
+            transfers.retain(|transfer|
+                !transfer.transaction_range.is_empty());
 
-        for transactions_skipped in 0..=index {
-            // Check how many active transfers remain.
-            match transfers.len() {
-                // If none remain, we cannot retrieve a transaction.
-                0 => return Err(IndexError(format!(concat!(
-                    "Active transfers ended after {} transactions, ",
-                    "unable to reach index {}"),
-                    transactions_skipped, index))),
-                // If only one remains, we can now fetch directly.
-                1 => {
-                    let transfer = &transfers[0];
-                    let parent_index = transfer.start_item_id.value;
-                    let child_index =
-                        transfer.count_range.start +
-                        transfer.estimated_count +
-                        index - transactions_skipped;
-                    let ep_traf = self.endpoint_traffic(transfer.endpoint_id)?;
-                    let ep_transaction_id =
-                        EndpointTransactionId::from_u64(child_index);
-                    let transaction_id =
-                        ep_traf.transaction_ids.get(ep_transaction_id)?;
-                    let item = Transaction(
-                        transfer.transfer_id, transaction_id);
-                    return Ok(NextLevelItem(
-                        span_index, parent_index, child_index, item))
-                }
-                // Otherwise, proceed with interleaved lookup.
-                _ => {}
-            };
-            // Get the next transaction ID for each transfer.
-            let mut transaction_ids = Vec::new();
-            for transfer in transfers.iter_mut() {
+            // If only one remains, look up directly.
+            if transfers.len() == 1 {
+                let transfer = &transfers[0];
                 let ep_traf = self.endpoint_traffic(transfer.endpoint_id)?;
                 // Get the next transaction ID for this transfer.
                 let ep_transaction_id =
-                    EndpointTransactionId::from_u64(
-                        transfer.count_range.start +
-                        transfer.estimated_count);
+                    transfer.transaction_range.start + index;
                 let transaction_id =
                     ep_traf.transaction_ids.get(ep_transaction_id)?;
-                transaction_ids.push(transaction_id);
-            }
-            // Find which transfer yielded the earliest transaction ID.
-            let (first, transaction_id) = transaction_ids
-                .iter()
-                .enumerate()
-                .min_by_key(|(_, id)| id.value)
-                .unwrap();
-            let transfer = &mut transfers[first];
-            // If we have now reached the requested index, return the
-            // transaction item with the ID we found.
-            if transactions_skipped == index {
-                let item = Transaction(transfer.transfer_id, *transaction_id);
                 let parent_index = transfer.start_item_id.value;
-                let child_index =
-                    transfer.count_range.start +
-                    transfer.estimated_count;
+                let child_index = ep_transaction_id.value;
+                let item = Transaction(
+                    transfer.transfer_id, transaction_id);
                 return Ok(NextLevelItem(
                     span_index, parent_index, child_index, item))
             }
-            // Otherwise, skip that transaction and repeat.
-            transfer.estimated_count += 1;
-            // If its transfer has now ended, remove it from the list.
-            if transfer.estimated_count == transfer.count_range.len() {
-                transfers.remove(first);
+
+            // Choose the transfer with the most transactions.
+            let (longest, longest_length) = transfers
+                .iter()
+                .enumerate()
+                .map(|(i, transfer)| (i, transfer.transaction_range.len()))
+                .max_by_key(|(_, length)| *length)
+                .ok_or_else(||
+                    IndexError(String::from("No transfers remaining")))?;
+
+            // If there are no transfers with more than 1 transaction,
+            // proceed to selecting from the remaining candidates.
+            if longest_length < 2 {
+                break
+            }
+
+            // Identify the midpoint of the longest transfer.
+            let midpoint_offset = longest_length / 2;
+
+            // Get the transaction ID at the midpoint, as a pivot.
+            let ep_traf =
+                self.endpoint_traffic(transfers[longest].endpoint_id)?;
+            let ep_transaction_id =
+                transfers[longest].transaction_range.start + midpoint_offset;
+            let pivot_transaction_id =
+                ep_traf.transaction_ids.get(ep_transaction_id)?;
+
+            // Find the offset of the pivot within each transfer.
+            let mut offsets = Vec::with_capacity(transfers.len());
+            for transfer in transfers.iter() {
+                offsets.push(
+                    if ptr::eq(transfer, &transfers[longest]) {
+                        midpoint_offset
+                    } else {
+                        let ep_traf =
+                            self.endpoint_traffic(transfer.endpoint_id)?;
+                        ep_traf.transaction_ids.bisect(
+                            &transfer.transaction_range, &pivot_transaction_id)?
+                    }
+                );
+            }
+
+            // Count the total transactions before the pivot.
+            let count = offsets.iter().sum::<u64>();
+
+            use std::cmp::Ordering::*;
+            match index.cmp(&count) {
+                Equal => {
+                    // If the index equals the count, return the pivot.
+                    let parent_index =
+                        transfers[longest].start_item_id.value;
+                    let child_index =
+                        transfers[longest].transaction_range.start.value + index;
+                    let item = Transaction(
+                        transfers[longest].transfer_id, pivot_transaction_id);
+                    return Ok(NextLevelItem(
+                        span_index, parent_index, child_index, item));
+                },
+                Less => {
+                    // If the index is less than the count, split the ranges
+                    // and discard the upper ends.
+                    for (transfer, offset) in transfers.iter_mut().zip(offsets) {
+                        transfer.transaction_range.end =
+                            transfer.transaction_range.start + offset;
+                    }
+                }
+                Greater => {
+                    // If the index is greater than the count, split the ranges
+                    // and discard the lower ends.
+                    for (transfer, offset) in transfers.iter_mut().zip(offsets) {
+                        transfer.transaction_range.start += offset;
+                    }
+                    // Reduce the index by the count of excluded transactions.
+                    index -= count;
+                }
             }
         }
 
-        // If we get to here, something doesn't add up right.
-        Err(IndexError(String::from("Somehow fell out of search loop")))
+        // There is now at most one transaction in each transfer. Retrieve each
+        // and find the one with the lowest transaction ID.
+        let mut results = Vec::with_capacity(transfers.len());
+        for transfer in transfers.iter() {
+            if !transfer.transaction_range.is_empty() {
+                let ep_traf = self.endpoint_traffic(transfer.endpoint_id)?;
+                let transaction_id =
+                    ep_traf.transaction_ids.get(
+                        transfer.transaction_range.start)?;
+                results.push((transfer, transaction_id));
+            }
+        }
+        results.sort_by_key(|(_, id)| id.value);
+        let (transfer, transaction_id) = results
+            .get(index as usize)
+            .ok_or_else(||
+                IndexError(String::from("Index not found")))?;
+        let parent_index = transfer.start_item_id.value;
+        let child_index = transfer.transaction_range.start.value;
+        let item = Transaction(transfer.transfer_id, *transaction_id);
+        Ok(NextLevelItem(span_index, parent_index, child_index, item))
     }
 
     fn summary(&mut self, item: &TrafficItem)
