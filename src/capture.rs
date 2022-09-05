@@ -972,6 +972,15 @@ impl ItemSource<TrafficItem> for Capture {
                     span_index, parent_index, child_index, item))
             }
 
+            // Exclude transactions that cannot possibly match the index.
+            for transfer in transfers.iter_mut() {
+                let range = &transfer.transaction_range;
+                if range.len() > index + 1 {
+                    transfer.transaction_range.end =
+                        range.start + index + 1;
+                }
+            }
+
             // Choose the transfer with the most transactions.
             let (longest, longest_length) = transfers
                 .iter()
