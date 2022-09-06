@@ -1,11 +1,11 @@
 use std::fs::File;
 use std::io::prelude::*;
-use std::io::SeekFrom;
+use std::io::BufWriter;
 use std::marker::PhantomData;
-use std::ops::Range;
+use std::ops::{Deref, Range};
 
-use bufreaderwriter::BufReaderWriter;
-use bytemuck::{bytes_of, bytes_of_mut, Pod};
+use bytemuck::{bytes_of, pod_read_unaligned, Pod};
+use memmap2::{Mmap, MmapOptions};
 use tempfile::tempfile;
 use thiserror::Error;
 
@@ -19,9 +19,11 @@ pub enum FileVecError {
 
 pub struct FileVec<T> where T: Pod + Default {
     _marker: PhantomData<T>,
-    file: BufReaderWriter<File>,
+    writer: BufWriter<File>,
     file_length: u64,
     item_count: u64,
+    map_length: usize,
+    map: Option<Mmap>,
 }
 
 impl<T: Pod + Default> FileVec<T> {
@@ -29,9 +31,11 @@ impl<T: Pod + Default> FileVec<T> {
         let file = tempfile()?;
         Ok(Self{
             _marker: PhantomData,
-            file: BufReaderWriter::new_writer(file),
+            writer: BufWriter::new(file),
             file_length: 0,
             item_count: 0,
+            map_length: 0,
+            map: None,
         })
     }
 
@@ -39,7 +43,7 @@ impl<T: Pod + Default> FileVec<T> {
        -> Result<Id<T>, FileVecError> where T: Pod
     {
         let data= bytes_of(item);
-        self.file.write_all(data)?;
+        self.writer.write_all(data)?;
         self.file_length += data.len() as u64;
         let id = Id::<T>::from(self.item_count);
         self.item_count += 1;
@@ -51,7 +55,7 @@ impl<T: Pod + Default> FileVec<T> {
     {
         for item in items {
             let data = bytes_of(item);
-            self.file.write_all(data)?;
+            self.writer.write_all(data)?;
             self.file_length += data.len() as u64;
         }
         let id = Id::<T>::from(self.item_count);
@@ -59,26 +63,40 @@ impl<T: Pod + Default> FileVec<T> {
         Ok(id)
     }
 
+    fn access(&mut self, range: &Range<Id<T>>)
+        -> Result<&impl Deref<Target=[u8]>, FileVecError>
+    {
+        let size = std::mem::size_of::<T>() as usize;
+        let end = size * range.end.value as usize;
+        if end > self.map_length {
+            self.writer.flush()?;
+            let file = self.writer.get_ref();
+            unsafe {
+               self.map = Some(MmapOptions::new().map(file)?);
+            }
+            self.map_length = self.file_length as usize;
+        }
+        Ok(self.map.as_ref().unwrap())
+    }
+
     pub fn get(&mut self, id: Id<T>) -> Result<T, FileVecError> {
-        let mut result: T = Default::default();
-        let start = id.value * std::mem::size_of::<T>() as u64;
-        self.file.seek(SeekFrom::Start(start as u64))?;
-        self.file.read_exact(bytes_of_mut(&mut result))?;
-        self.file.seek(SeekFrom::Start(self.file_length))?;
-        Ok(result)
+        let range = id..(id + 1);
+        let data = self.access(&range)?;
+        let size = std::mem::size_of::<T>() as usize;
+        let start = size * id.value as usize;
+        let end = start + size;
+        Ok(pod_read_unaligned::<T>(&data[start..end]))
     }
 
     pub fn get_range(&mut self, range: Range<Id<T>>) -> Result<Vec<T>, FileVecError> {
-        let mut buf: T = Default::default();
         let mut result = Vec::new();
-        let start = range.start.value * std::mem::size_of::<T>() as u64;
-        let end = range.end.value;
-        self.file.seek(SeekFrom::Start(start as u64))?;
-        for _ in start .. end {
-            self.file.read_exact(bytes_of_mut(&mut buf))?;
-            result.push(buf);
+        let data = self.access(&range)?;
+        let size = std::mem::size_of::<T>() as usize;
+        for i in range.start.value..range.end.value {
+            let start = size * i as usize;
+            let end = start + size;
+            result.push(pod_read_unaligned::<T>(&data[start..end]))
         }
-        self.file.seek(SeekFrom::Start(self.file_length))?;
         Ok(result)
     }
 
