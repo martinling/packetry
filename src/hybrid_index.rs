@@ -1,14 +1,15 @@
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::prelude::*;
-use std::io::SeekFrom;
-use std::ops::Range;
+use std::io::BufWriter;
+use std::ops::{Range, Deref};
 use std::cmp::{min, max};
 use std::marker::PhantomData;
 
-use bufreaderwriter::BufReaderWriter;
 use tempfile::tempfile;
 use thiserror::Error;
 use bisection::{bisect_left, bisect_right};
+use memmap2::{Mmap, MmapOptions};
 
 use crate::id::Id;
 
@@ -22,6 +23,12 @@ bitfield! {
     pub struct IncrementFields(u64);
     u64, count, set_count: 59, 0;
     u8, width, set_width: 63, 60;
+}
+
+impl IncrementFields {
+    fn size(&self) -> u64 {
+        self.count() * self.width() as u64
+    }
 }
 
 struct Entry {
@@ -48,13 +55,13 @@ impl<T> Number for Id<T> {
 pub struct HybridIndex<I, T> {
     _marker: PhantomData<(I, T)>,
     min_width: u8,
-    file: BufReaderWriter<File>,
+    writer: BufWriter<File>,
     file_length: u64,
     total_count: u64,
     entries: Vec<Entry>,
     index: Vec<u64>,
     last_value: u64,
-    at_end: bool,
+    mappings: BTreeMap<u64, Mmap>,
 }
 
 impl<I: Number, T: Number + Copy + Ord> HybridIndex<I, T> {
@@ -63,13 +70,13 @@ impl<I: Number, T: Number + Copy + Ord> HybridIndex<I, T> {
         Ok(Self{
             _marker: PhantomData,
             min_width,
-            file: BufReaderWriter::new_writer(file),
+            writer: BufWriter::new(file),
             file_length: 0,
             total_count: 0,
             entries: Vec::new(),
             index: Vec::new(),
             last_value: 0,
-            at_end: true,
+            mappings: BTreeMap::new(),
         })
     }
 
@@ -101,11 +108,7 @@ impl<I: Number, T: Number + Copy + Ord> HybridIndex<I, T> {
                     last_entry.increments.set_width(width);
                 }
                 let bytes = increment.to_le_bytes();
-                if !self.at_end {
-                   self.file.seek(SeekFrom::Start(self.file_length))?;
-                   self.at_end = true;
-                }
-                self.file.write_all(&bytes[0..width as usize])?;
+                self.writer.write_all(&bytes[0..width as usize])?;
                 self.file_length += width as u64;
                 last_entry.increments.set_count(count + 1);
             }
@@ -116,6 +119,27 @@ impl<I: Number, T: Number + Copy + Ord> HybridIndex<I, T> {
         Ok(new_id)
     }
 
+    fn access(&mut self, entry_id: usize)
+        -> Result<(&Entry, &impl Deref<Target=[u8]>), HybridIndexError>
+    {
+        use std::collections::btree_map::Entry::Vacant;
+        let entry = &self.entries[entry_id];
+        if let Vacant(vacant) = self.mappings.entry(entry.file_offset) {
+            self.writer.flush()?;
+            let file = self.writer.get_ref();
+            vacant.insert(
+                unsafe {
+                    MmapOptions::new()
+                        .offset(entry.file_offset)
+                        .len(entry.increments.size() as usize)
+                        .map(file)?
+                }
+            );
+        }
+        let block = self.mappings.get(&entry.file_offset).unwrap();
+        Ok((entry, block))
+    }
+
     pub fn get(&mut self, id: I) -> Result<T, HybridIndexError> {
         let id_value = id.to_u64();
         let entry_id = bisect_right(self.index.as_slice(), &id_value) - 1;
@@ -124,12 +148,12 @@ impl<I: Number, T: Number + Copy + Ord> HybridIndex<I, T> {
         if increment_id == 0 {
             Ok(<T>::from_u64(entry.base_value))
         } else {
-            let width = entry.increments.width();
-            let start = entry.file_offset + (increment_id - 1) * width as u64;
+            let (entry, block) = self.access(entry_id)?;
+            let width = entry.increments.width() as usize;
+            let start = width * (increment_id - 1) as usize;
+            let end = start + width as usize;
             let mut bytes = [0_u8; 8];
-            self.file.seek(SeekFrom::Start(start))?;
-            self.at_end = false;
-            self.file.read_exact(&mut bytes[0..width as usize])?;
+            bytes[0..width].copy_from_slice(&block[start..end]);
             let increment = u64::from_le_bytes(bytes);
             let value = entry.base_value + increment;
             Ok(<T>::from_u64(value))
@@ -158,16 +182,17 @@ impl<I: Number, T: Number + Copy + Ord> HybridIndex<I, T> {
             if read_count == 0 {
                 continue;
             }
-            let width = entry.increments.width();
-            let start = entry.file_offset + increment_id * width as u64;
-            self.file.seek(SeekFrom::Start(start))?;
-            self.at_end = false;
-            let mut bytes = [0_u8; 8];
+            let width = entry.increments.width() as usize;
+            let (entry, block) = self.access(entry_id)?;
+            let mut start = increment_id as usize * width;
             for _ in 0..read_count {
-                self.file.read_exact(&mut bytes[0..width as usize])?;
+                let mut bytes = [0_u8; 8];
+                let end = start + width;
+                bytes[0..width].copy_from_slice(&block[start..end]);
                 let increment = u64::from_le_bytes(bytes);
                 let value = entry.base_value + increment;
                 result.push(<T>::from_u64(value));
+                start += width;
             }
             i += read_count;
         }
