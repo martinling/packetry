@@ -48,7 +48,7 @@ use {
     record_ui::{UIAction, create_logfile, log_action},
 };
 
-fn create_view<Item: 'static, Model, RowData>(
+fn create_view<Item: 'static, Cursor: 'static, Model, RowData>(
     capture: &Arc<Mutex<Capture>>,
     #[cfg(feature="record-ui-test")]
     logfile: Rc<RefCell<File>>
@@ -57,7 +57,7 @@ fn create_view<Item: 'static, Model, RowData>(
         Item: Copy + Debug,
         Model: GenericModel<Item> + IsA<ListModel>,
         RowData: GenericRowData<Item> + IsA<Object>,
-        Capture: ItemSource<Item>
+        Capture: ItemSource<Item, Cursor>
 {
     let model = Model::new(capture.clone())
                       .expect("Failed to create model");
@@ -192,6 +192,7 @@ fn run() -> Result<(), PacketryError> {
 
         let listview = create_view::<
             capture::TrafficItem,
+            capture::TrafficCursor,
             model::TrafficModel,
             row_data::TrafficRowData>(
                 &capture,
@@ -208,6 +209,7 @@ fn run() -> Result<(), PacketryError> {
 
         let device_tree = create_view::<
             capture::DeviceItem,
+            (),
             model::DeviceModel,
             row_data::DeviceRowData>(
                 &capture,

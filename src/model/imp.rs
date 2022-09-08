@@ -4,18 +4,20 @@ use gio::subclass::prelude::*;
 use gtk::{gio, glib, prelude::*};
 
 use std::cell::RefCell;
-use crate::capture::{TrafficItem, DeviceItem};
+use crate::capture::{TrafficItem, DeviceItem, TrafficCursor};
 use crate::row_data::{TrafficRowData, DeviceRowData};
 use crate::tree_list_model::TreeListModel;
 
 #[derive(Default)]
 pub struct TrafficModel {
-    pub(super) tree: RefCell<Option<TreeListModel<TrafficItem, TrafficRowData>>>,
+    pub(super) tree: RefCell<Option<
+        TreeListModel<TrafficItem, TrafficRowData, TrafficCursor>>>,
 }
 
 #[derive(Default)]
 pub struct DeviceModel {
-    pub(super) tree: RefCell<Option<TreeListModel<DeviceItem, DeviceRowData>>>,
+    pub(super) tree: RefCell<Option<
+        TreeListModel<DeviceItem, DeviceRowData, ()>>>,
 }
 
 /// Basic declaration of our type for the GObject type system
@@ -50,7 +52,7 @@ impl ListModelImpl for TrafficModel {
     fn item(&self, _list_model: &Self::Type, position: u32)
         -> Option<glib::Object>
     {
-        match self.tree.borrow().as_ref() {
+        match self.tree.borrow_mut().as_mut() {
             Some(tree) => tree.item(position),
             None => None
         }
@@ -72,7 +74,7 @@ impl ListModelImpl for DeviceModel {
     fn item(&self, _list_model: &Self::Type, position: u32)
         -> Option<glib::Object>
     {
-        match self.tree.borrow().as_ref() {
+        match self.tree.borrow_mut().as_mut() {
             Some(tree) => tree.item(position),
             None => None
         }

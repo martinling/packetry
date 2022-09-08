@@ -277,19 +277,20 @@ impl Debug for ModelUpdate {
     }
 }
 
-pub struct TreeListModel<Item, RowData> {
+pub struct TreeListModel<Item, RowData, Cursor> {
     _marker: PhantomData<RowData>,
     capture: Arc<Mutex<Capture>>,
     regions: BTreeMap<u64, Region<Item>>,
     root: Rc<RefCell<RootNode<Item>>>,
     item_count: u64,
     row_count: u64,
+    last_fetch: Option<(u64, Cursor)>,
 }
 
-impl<Item, RowData> TreeListModel<Item, RowData>
+impl<Item, RowData, Cursor> TreeListModel<Item, RowData, Cursor>
 where Item: Copy + Debug + 'static,
       RowData: GenericRowData<Item> + IsA<Object> + Cast,
-      Capture: ItemSource<Item>
+      Capture: ItemSource<Item, Cursor>
 {
     pub fn new(capture: Arc<Mutex<Capture>>) -> Result<Self, ModelError> {
         use Source::*;
@@ -306,6 +307,7 @@ where Item: Copy + Debug + 'static,
                     map: BTreeMap::new(),
                 }
             })),
+            last_fetch: None,
         };
         model.regions.insert(0, Region {
             source: Root(),
@@ -377,13 +379,13 @@ where Item: Copy + Debug + 'static,
         let item = &node.item;
         let mut expanded = self.adapt_expanded(expanded);
         let mut cap = self.capture.lock().or(Err(LockError))?;
-        let search_result = cap.find_child(&mut expanded, range, to_index);
-        Ok(match search_result {
-            Ok(TopLevelItem(found_index, _)) => {
+        let result = cap.find_child(&mut expanded, range, to_index);
+        Ok(match result {
+            Ok((TopLevelItem(found_index, _), _)) => {
                 let range_to_item = range.start..found_index;
                 cap.count_within(item_index, item, &range_to_item)?
             },
-            Ok(NextLevelItem(span_index, .., child)) => {
+            Ok((NextLevelItem(span_index, .., child), _)) => {
                 let range_to_span = range.start..span_index;
                 cap.count_within(item_index, item, &range_to_span)? +
                     cap.count_before(item_index, item, span_index, &child)?
@@ -1263,10 +1265,12 @@ where Item: Copy + Debug + 'static,
             }
         }
 
+        self.last_fetch = None;
+
         Ok(update)
     }
 
-    fn fetch(&self, position: u64) -> Result<ItemRc<Item>, ModelError> {
+    fn fetch(&mut self, position: u64) -> Result<ItemRc<Item>, ModelError> {
         // Fetch the region this row is in.
         let (start, region) = self.regions
             .range(..=position)
@@ -1296,11 +1300,17 @@ where Item: Copy + Debug + 'static,
             },
             // Region requiring interleaved search.
             Interleaved(expanded_rcs, range) => {
-                // Run the interleaved search.
-                let mut expanded = self.adapt_expanded(expanded_rcs);
-                let search_result =
-                    cap.find_child(&mut expanded, range, index)?;
-
+                let (search_result, cursor) = match self.last_fetch.take() {
+                    // Take shortcut if fetching the next row.
+                    Some((n, cursor)) if (n + 1) == position =>
+                        cap.next_child(cursor),
+                    // Otherwise, run the interleaved search.
+                    _ => {
+                        let mut expanded = self.adapt_expanded(expanded_rcs);
+                        cap.find_child(&mut expanded, range, index)
+                    }
+                }?;
+                self.last_fetch = Some((position, cursor));
                 // Return a node corresponding to the search result.
                 match search_result {
                     // Search found a top level item.
@@ -1330,7 +1340,7 @@ where Item: Copy + Debug + 'static,
         min(self.row_count, u32::MAX as u64) as u32
     }
 
-    pub fn item(&self, position: u32) -> Option<Object> {
+    pub fn item(&mut self, position: u32) -> Option<Object> {
         // Check row number is valid.
         if position >= self.n_items() {
             return None
