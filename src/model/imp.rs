@@ -4,7 +4,7 @@ use gio::subclass::prelude::*;
 use gtk::{gio, glib, prelude::*};
 
 use std::cell::RefCell;
-use crate::capture::{TrafficItem, DeviceItem};
+use crate::capture::{TrafficItem, DeviceItem, TrafficCursor, DeviceCursor};
 use crate::row_data::{GenericRowData, TrafficRowData, DeviceRowData};
 use crate::tree_list_model::TreeListModel;
 
@@ -12,12 +12,12 @@ use super::{clamp, MAX_ROWS};
 
 #[derive(Default)]
 pub struct TrafficModel {
-    pub(super) tree: RefCell<Option<TreeListModel<TrafficItem>>>,
+    pub(super) tree: RefCell<Option<TreeListModel<TrafficItem, TrafficCursor>>>,
 }
 
 #[derive(Default)]
 pub struct DeviceModel {
-    pub(super) tree: RefCell<Option<TreeListModel<DeviceItem>>>,
+    pub(super) tree: RefCell<Option<TreeListModel<DeviceItem, DeviceCursor>>>,
 }
 
 /// Basic declaration of our type for the GObject type system
@@ -52,7 +52,7 @@ impl ListModelImpl for TrafficModel {
     fn item(&self, _list_model: &Self::Type, position: u32)
         -> Option<glib::Object>
     {
-        match self.tree.borrow().as_ref() {
+        match self.tree.borrow_mut().as_mut() {
             Some(tree) => {
                 if position >= clamp(tree.row_count(), MAX_ROWS) {
                     None
@@ -61,7 +61,7 @@ impl ListModelImpl for TrafficModel {
                         .map_err(|e| format!("{:?}", e));
                     Some(TrafficRowData::new(result).upcast::<glib::Object>())
                 }
-            }
+            },
             None => None
         }
     }
@@ -82,7 +82,7 @@ impl ListModelImpl for DeviceModel {
     fn item(&self, _list_model: &Self::Type, position: u32)
         -> Option<glib::Object>
     {
-        match self.tree.borrow().as_ref() {
+        match self.tree.borrow_mut().as_mut() {
             Some(tree) => {
                 if position >= clamp(tree.row_count(), MAX_ROWS) {
                     None

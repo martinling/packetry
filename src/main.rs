@@ -64,7 +64,7 @@ thread_local!(
     static WINDOW: RefCell<Option<ApplicationWindow>> = RefCell::new(None);
 );
 
-fn create_view<Item: 'static, Model, RowData>(
+fn create_view<Item: 'static, Cursor: 'static, Model, RowData>(
     capture: &Arc<Mutex<Capture>>,
     #[cfg(feature="record-ui-test")]
     logfile: Rc<RefCell<File>>
@@ -73,7 +73,7 @@ fn create_view<Item: 'static, Model, RowData>(
         Item: Copy + Debug,
         Model: GenericModel<Item> + IsA<ListModel> + IsA<Object>,
         RowData: GenericRowData<Item> + IsA<Object>,
-        Capture: ItemSource<Item>
+        Capture: ItemSource<Item, Cursor>
 {
     let model = Model::new(capture.clone())
                       .expect("Failed to create model");
@@ -270,6 +270,7 @@ fn activate(application: &Application) -> Result<(), PacketryError> {
     }
 
     let listview = create_view::<capture::TrafficItem,
+                                 capture::TrafficCursor,
                                  model::TrafficModel,
                                  row_data::TrafficRowData>(
                                      &app_capture,
@@ -285,6 +286,7 @@ fn activate(application: &Application) -> Result<(), PacketryError> {
     scrolled_window.set_child(Some(&listview));
 
     let device_tree = create_view::<capture::DeviceItem,
+                                    capture::DeviceCursor,
                                     model::DeviceModel,
                                     row_data::DeviceRowData>(
                                         &app_capture,
