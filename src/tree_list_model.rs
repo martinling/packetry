@@ -67,9 +67,6 @@ pub struct ItemNode<Item> {
     /// Interval spanned by this item.
     interval: Interval,
 
-    /// Number of children of this item.
-    child_count: u64,
-
     /// Expanded children of this item.
     expanded: ExpandedChildren<Item>,
 }
@@ -142,10 +139,6 @@ where Item: 'static + Copy
             // Parent is dropped, so node cannot be expanded.
             None => false
         }
-    }
-
-    pub fn expandable(&self) -> bool {
-        self.child_count != 0
     }
 
     pub fn field(&self,
@@ -337,13 +330,23 @@ where Item: Copy + Debug + 'static,
                         start: index,
                         end: cap.item_end(&item, index)?,
                     },
-                    child_count: cap.child_count(&item)?,
                     expanded: ExpandedChildren {
                         map: BTreeMap::new()
                     }
                 }))
             }
         })
+    }
+
+    fn child_count(&self, node: &ItemNode<Item>) -> Result<u64, ModelError> {
+        let mut cap = self.capture.lock().or(Err(LockError))?;
+        Ok(cap.child_count(&node.item)?)
+    }
+
+    pub fn expandable(&self, node: &ItemNode<Item>)
+        -> Result<bool, ModelError>
+    {
+        Ok(self.child_count(node)? > 0)
     }
 
     fn range(&self, node_ref: &ItemRc<Item>) -> Range<u64> {
@@ -488,7 +491,7 @@ where Item: Copy + Debug + 'static,
                     Region {
                         source: Children(node_ref.clone()),
                         offset: 0,
-                        length: node.child_count,
+                        length: self.child_count(&node)?,
                     },
                     vec![Region {
                         source: parent.source.clone(),
@@ -643,7 +646,7 @@ where Item: Copy + Debug + 'static,
                 }
                 ModelUpdate {
                     rows_added: 0,
-                    rows_removed: node_ref.borrow().child_count,
+                    rows_removed: self.child_count(&node_ref.borrow())?,
                     rows_changed: 0,
                 }
             },

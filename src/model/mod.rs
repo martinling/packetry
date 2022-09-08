@@ -10,7 +10,7 @@ use gtk::prelude::ListModelExt;
 use gtk::{gio, glib};
 
 use crate::capture::{Capture, TrafficItem, DeviceItem};
-use crate::tree_list_model::{TreeListModel, ItemRc, ModelError};
+use crate::tree_list_model::{TreeListModel, ItemNode, ItemRc, ModelError};
 
 pub const MAX_ROWS: u64 = u32::MAX as u64;
 
@@ -28,6 +28,7 @@ glib::wrapper! {
 
 pub trait GenericModel<Item> where Self: Sized {
     fn new(capture: Arc<Mutex<Capture>>) -> Result<Self, ModelError>;
+    fn expandable(&self, node: &ItemNode<Item>) -> Result<bool, ModelError>;
     fn set_expanded(&self, node: &ItemRc<Item>, position: u32, expanded: bool)
         -> Result<(), ModelError>;
 }
@@ -39,6 +40,16 @@ impl GenericModel<TrafficItem> for TrafficModel {
         let tree = TreeListModel::new(capture)?;
         model.imp().tree.replace(Some(tree));
         Ok(model)
+    }
+
+    fn expandable(&self, node: &ItemNode<TrafficItem>)
+        -> Result<bool, ModelError>
+    {
+        self.imp().tree
+            .borrow_mut()
+            .as_mut()
+            .unwrap()
+            .expandable(node)
     }
 
     fn set_expanded(&self,
@@ -78,6 +89,16 @@ impl GenericModel<DeviceItem> for DeviceModel {
         let tree = TreeListModel::new(capture)?;
         model.imp().tree.replace(Some(tree));
         Ok(model)
+    }
+
+    fn expandable(&self, node: &ItemNode<DeviceItem>)
+        -> Result<bool, ModelError>
+    {
+        self.imp().tree
+            .borrow_mut()
+            .as_mut()
+            .unwrap()
+            .expandable(node)
     }
 
     fn set_expanded(&self,

@@ -98,7 +98,10 @@ fn create_view<Item: 'static, Cursor: 'static, Model, RowData>(
                 let connectors = node.field(
                     &cap_arc, Box::new(Capture::connectors));
                 expander_wrapper.set_connectors(connectors);
-                expander.set_visible(node.expandable());
+                expander.set_visible(
+                    model
+                        .expandable(&node)
+                        .expect("Failed to determine if node is expandable"));
                 expander.set_expanded(node.expanded());
                 let model = model.clone();
                 let node_ref = node_ref.clone();
