@@ -28,7 +28,7 @@ pub struct LunaDevice {
 }
 
 pub struct LunaCapture {
-    receiver: Receiver<Vec<u8>>,
+    receiver: Receiver<Result<Vec<u8>, Error>>,
     stop_request: Sender<()>,
 }
 
@@ -56,11 +56,16 @@ impl LunaDevice {
                     Ok(count) => {
                         packet_queue.extend(&buffer[..count]);
                         while let Some(packet) = packet_queue.next() {
-                            tx.send(packet).or(Err(Error::ChannelSend))?;
+                            tx.send(Ok(packet))
+                                .or(Err(Error::ChannelSend))?;
                         };
                     },
                     Err(rusb::Error::Timeout) => continue,
-                    Err(error) => return Err(Error::from(error)),
+                    Err(usb_error) => {
+                        tx.send(Err(Error::from(usb_error)))
+                            .or(Err(Error::ChannelSend))?;
+                        return Err(Error::from(usb_error));
+                    }
                 }
             }
             self.enable_capture(false)?;
@@ -88,7 +93,7 @@ impl LunaDevice {
 }
 
 impl LunaCapture {
-    pub fn next(&mut self) -> Option<Vec<u8>> {
+    pub fn next(&mut self) -> Option<Result<Vec<u8>, Error>> {
         self.receiver.try_recv().ok()
     }
 }

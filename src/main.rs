@@ -196,7 +196,7 @@ fn run(source_id: &mut Option<SourceId>) -> Result<(), PacketryError> {
             let mut cap = update_capture.lock()
                 .or(Err(PacketryError::LockError))?;
             while let Some(packet) = luna.next() {
-                decoder.handle_raw_packet(&mut cap, &packet)?;
+                decoder.handle_raw_packet(&mut cap, &packet?)?;
             }
             drop(cap);
 
