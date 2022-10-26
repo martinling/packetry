@@ -13,11 +13,17 @@ use std::sync::{Arc, Mutex};
 
 use gtk::gio::ListModel;
 use gtk::glib::{
+    self,
     Object,
     source::SourceId,
 };
 use gtk::{
     prelude::*,
+    ApplicationWindow,
+    MessageDialog,
+    DialogFlags,
+    MessageType,
+    ButtonsType,
     ListView,
     SignalListItemFactory,
     SingleSelection,
@@ -42,6 +48,7 @@ mod vec_map;
 
 thread_local!(
     static MODELS: RefCell<Vec<Object>>  = RefCell::new(Vec::new());
+    static WINDOW: RefCell<Option<ApplicationWindow>> = RefCell::new(None);
 );
 
 fn create_view<Item: 'static, Model, RowData>(capture: &Arc<Mutex<Capture>>)
@@ -172,6 +179,7 @@ fn run(source_id: &mut Option<SourceId>) -> Result<(), PacketryError> {
 
         window.set_child(Some(&paned));
         window.show();
+        WINDOW.with(|win_opt| win_opt.replace(Some(window.clone())));
     });
 
     if args.len() > 1 {
@@ -208,7 +216,10 @@ fn run(source_id: &mut Option<SourceId>) -> Result<(), PacketryError> {
             move || {
                 match update_routine() {
                     Ok(_) => Continue(true),
-                    Err(_) => Continue(false),
+                    Err(e) => {
+                        display_error(e);
+                        Continue(false)
+                    }
                 }
             }
         ));
@@ -218,13 +229,36 @@ fn run(source_id: &mut Option<SourceId>) -> Result<(), PacketryError> {
     Ok(())
 }
 
+fn display_error(e: PacketryError) {
+    let message = format!("Error: {:?}", e);
+    WINDOW.with(|win_opt| {
+        match win_opt.borrow().as_ref() {
+            None => println!("{}", message),
+            Some(window) => {
+                let dialog = MessageDialog::new(
+                    Some(window),
+                    DialogFlags::MODAL,
+                    MessageType::Error,
+                    ButtonsType::Close,
+                    &message
+                );
+                dialog.set_transient_for(Some(window));
+                dialog.set_modal(true);
+                dialog.connect_response(
+                    glib::clone!(@weak window => move |_, _| window.destroy()));
+                dialog.show();
+            }
+        }
+    });
+}
+
 fn main() {
     let mut source_id: Option<SourceId> = None;
-    match run(&mut source_id) {
-        Ok(()) => {},
-        Err(e) => println!("Error: {:?}", e)
-    }
+    let result = run(&mut source_id);
     if let Some(source) = source_id {
         source.remove();
+    }
+    if let Err(e) = result {
+        display_error(e);
     }
 }
