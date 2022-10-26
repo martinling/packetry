@@ -24,33 +24,31 @@ pub enum Error {
 }
 
 pub struct LunaDevice {
-    handle: Option<DeviceHandle<GlobalContext>>,
-    worker: Option<thread::JoinHandle<Result<(), Error>>>,
-    receiver: Option<Receiver<Vec<u8>>>,
+    handle: DeviceHandle<GlobalContext>,
 }
 
+pub struct LunaCapture {
+    receiver: Receiver<Vec<u8>>,
+}
 
 impl LunaDevice {
     pub fn open() -> Result<Self, Error> {
         let handle = rusb::open_device_with_vid_pid(VID, PID).ok_or(Error::NotFound)?;
         Ok(LunaDevice {
-            handle: Some(handle),
-            worker: None,
-            receiver: None,
+            handle,
         })
     }
 
-    pub fn start(&mut self) -> Result<(), Error> {
-        let mut handle = self.handle.take().unwrap();
-        handle.claim_interface(0)?;
+    pub fn start(mut self) -> Result<LunaCapture, Error> {
+        self.handle.claim_interface(0)?;
         let (tx, rx) = channel();
-        self.receiver = Some(rx);
-        let thread = thread::spawn(move || {
+        thread::spawn::<_, Result<(), Error>>(move || {
             let mut buffer = [0u8; READ_LEN];
             let mut packet_queue = PacketQueue::new();
-            LunaDevice::enable_capture(&handle)?;
+            self.enable_capture()?;
             loop {
-                let result = handle.read_bulk(ENDPOINT, &mut buffer, Duration::from_secs(1));
+                let result = self.handle.read_bulk(
+                    ENDPOINT, &mut buffer, Duration::from_secs(1));
                 match result {
                     Ok(count) => {
                         packet_queue.extend(&buffer[..count]);
@@ -63,13 +61,14 @@ impl LunaDevice {
                 }
             }
         });
-        self.worker = Some(thread);
-        Ok(())
+        Ok(LunaCapture {
+            receiver: rx,
+        })
     }
 
-    fn enable_capture(handle: &DeviceHandle<GlobalContext>) -> Result<(), Error> {
+    fn enable_capture(&mut self) -> Result<(), Error> {
         use rusb::{Direction, RequestType, Recipient, request_type};
-        handle.write_control(
+        self.handle.write_control(
             request_type(Direction::Out, RequestType::Vendor, Recipient::Device),
             1,
             1,
@@ -79,10 +78,11 @@ impl LunaDevice {
         )?;
         Ok(())
     }
+}
 
+impl LunaCapture {
     pub fn next(&mut self) -> Option<Vec<u8>> {
-        let rx = self.receiver.as_ref().unwrap();
-        rx.try_recv().ok()
+        self.receiver.try_recv().ok()
     }
 }
 

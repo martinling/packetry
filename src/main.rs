@@ -174,8 +174,10 @@ fn run() -> Result<(), PacketryError> {
             decoder.handle_raw_packet(&mut cap, &packet).unwrap();
         }
     } else {
-        let mut luna = backend::luna::LunaDevice::open().unwrap();
-        luna.start().unwrap();
+        let mut luna = backend::luna::LunaDevice::open()
+            .unwrap()
+            .start()
+            .unwrap();
         let update_capture = capture.clone();
         gtk::glib::timeout_add_local(std::time::Duration::from_millis(1), move || {
             let mut cap = update_capture.lock().ok().unwrap();
