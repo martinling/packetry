@@ -183,10 +183,12 @@ fn run(source_id: &mut Option<SourceId>) -> Result<(), PacketryError> {
     } else {
         let mut luna = backend::luna::LunaDevice::open()?.start()?;
         let update_capture = capture.clone();
-        *source_id = Some(gtk::glib::timeout_add_local(std::time::Duration::from_millis(1), move || {
-            let mut cap = update_capture.lock().ok().unwrap();
+
+        let mut update_routine = move || -> Result<(), PacketryError> {
+            let mut cap = update_capture.lock()
+                .or(Err(PacketryError::LockError))?;
             while let Some(packet) = luna.next() {
-                decoder.handle_raw_packet(&mut cap, &packet).unwrap();
+                decoder.handle_raw_packet(&mut cap, &packet)?;
             }
             drop(cap);
 
@@ -198,9 +200,18 @@ fn run(source_id: &mut Option<SourceId>) -> Result<(), PacketryError> {
                     };
                 }
             );
+            Ok(())
+        };
 
-            Continue(true)
-        }));
+        *source_id = Some(gtk::glib::timeout_add_local(
+            std::time::Duration::from_millis(1),
+            move || {
+                match update_routine() {
+                    Ok(_) => Continue(true),
+                    Err(_) => Continue(false),
+                }
+            }
+        ));
     }
 
     application.run_with_args::<&str>(&[]);
