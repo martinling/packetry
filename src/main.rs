@@ -33,6 +33,7 @@ use gtk::{
 use model::GenericModel;
 use row_data::GenericRowData;
 use expander::ExpanderWrapper;
+use tree_list_model::ModelError;
 
 mod capture;
 use capture::{Capture, CaptureError, ItemSource};
@@ -121,6 +122,8 @@ pub enum PacketryError {
     #[error(transparent)]
     CaptureError(#[from] CaptureError),
     #[error(transparent)]
+    ModelError(#[from] ModelError),
+    #[error(transparent)]
     PcapError(#[from] pcap::Error),
     #[error(transparent)]
     LunaError(#[from] crate::backend::luna::Error),
@@ -200,14 +203,15 @@ fn run(source_id: &mut Option<SourceId>) -> Result<(), PacketryError> {
             }
             drop(cap);
 
-            MODELS.with(|models|
+            MODELS.with::<_, Result<(), ModelError>>(|models| {
                 for model in models.borrow().iter() {
                     let model = model.clone();
                     if let Ok(tree_model) = model.downcast::<crate::model::TrafficModel>() {
-                        tree_model.update();
+                        tree_model.update()?;
                     };
                 }
-            );
+                Ok(())
+            })?;
             Ok(())
         };
 
