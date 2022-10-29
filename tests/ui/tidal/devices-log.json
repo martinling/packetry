@@ -1,0 +1,9 @@
+{
+  "action": {
+    "Startup": []
+  },
+  "items": [
+    "Device(1)",
+    "Device(2)"
+  ]
+}
