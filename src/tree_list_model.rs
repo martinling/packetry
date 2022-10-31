@@ -206,6 +206,13 @@ where Item: Clone + Debug
     }
 }
 
+fn same_expanded<Item>(a: &Vec<ItemRc<Item>>, b: &Vec<ItemRc<Item>>) -> bool {
+    a.len() == b.len() &&
+        a.iter()
+            .zip(b.iter())
+            .all(|(a, b)| Rc::ptr_eq(a, b))
+}
+
 impl<Item> Region<Item>
 where Item: Clone + Debug
 {
@@ -217,10 +224,7 @@ where Item: Clone + Debug
         match (&region_a.source, &region_b.source) {
             (Interleaved(exp_a, range_a),
              Interleaved(exp_b, range_b))
-                if exp_a.len() == exp_b.len() &&
-                    exp_a.iter()
-                        .zip(exp_b.iter())
-                        .all(|(a, b)| Rc::ptr_eq(a, b)) => Some(
+                if same_expanded(exp_a, exp_b) => Some(
                     Region {
                         source: Interleaved(
                             exp_a.clone(),
