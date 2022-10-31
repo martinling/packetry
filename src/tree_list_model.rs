@@ -1128,17 +1128,7 @@ where Item: Copy + Debug + 'static,
         Ok(update)
     }
 
-    fn merge_regions(&mut self) {
-
-        #[cfg(feature="debug-region-map")]
-        {
-            println!();
-            println!("Before merge:");
-            for (start, region) in self.regions.iter() {
-                println!("{}: {:?}", start, region);
-            }
-        }
-
+    fn merge_pairs(&mut self) {
         self.regions = self.regions
             .split_off(&0)
             .into_iter()
@@ -1158,6 +1148,54 @@ where Item: Copy + Debug + 'static,
                 }
             )
             .collect();
+    }
+
+    fn merge_regions(&mut self) {
+        use Source::*;
+
+        #[cfg(feature="debug-region-map")]
+        {
+            println!();
+            println!("Before merge:");
+            for (start, region) in self.regions.iter() {
+                println!("{}: {:?}", start, region);
+            }
+        }
+
+        // Merge adjacent regions with the same source.
+        self.merge_pairs();
+
+        // Find starts and lengths of superfluous root regions.
+        let superfluous_regions: Vec<(u64, u64)> = self.regions
+            .iter()
+            .tuple_windows()
+            .filter_map(|((_, a), (b_start, b), (_, c))|
+                 match (&a.source, &b.source, &c.source) {
+                    (Interleaved(exp_a, _), Root(), Interleaved(exp_c, _))
+                        if same_expanded(exp_a, exp_c) => {
+                            #[cfg(feature="debug-region-map")]
+                            {
+                                println!();
+                                println!("Dropping: {:?}", b);
+                            }
+                            Some((*b_start, b.length))
+                        },
+                    _ => None
+                 })
+            .collect();
+
+        // Remove superfluous regions.
+        for (start, length) in superfluous_regions {
+            self.regions.remove(&start);
+            let (_, next_region) = self.regions
+                .range_mut(start..)
+                .next()
+                .unwrap();
+            next_region.length += length;
+        }
+
+        // Once again merge adjacent regions with the same source.
+        self.merge_pairs();
     }
 
     pub fn set_expanded(&mut self,
