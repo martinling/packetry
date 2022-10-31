@@ -550,7 +550,7 @@ where Item: Copy + Debug + 'static,
                         offset: 0,
                         length: changed + added,
                     },
-                    if relative_position == parent.length {
+                    if relative_position + changed == parent.length {
                         vec![]
                     } else {
                         vec![Region {
