@@ -408,7 +408,9 @@ where Item: Copy + Debug + 'static,
                 self.count_to_item(expanded, range, offset - 1, node_ref)?
             };
         let rows_before_end =
-            if end == length {
+            if end == 0 {
+                0
+            } else if end == length {
                 self.count_within(&[node_ref.clone()], range)?
             } else {
                 self.count_to_item(expanded, range, end - 1, node_ref)?
