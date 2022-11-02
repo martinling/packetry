@@ -32,6 +32,7 @@ use model::{GenericModel, TrafficModel};
 use row_data::GenericRowData;
 use expander::ExpanderWrapper;
 use tree_list_model::ModelError;
+use backend::luna;
 
 mod capture;
 use capture::{Capture, CaptureError, ItemSource};
@@ -98,7 +99,7 @@ fn create_view<Item: 'static, Model, RowData>(capture: &Arc<Mutex<Capture>>)
             if let Err(e) =
                 model.set_expanded(&node_ref, expander.is_expanded())
             {
-                display_error(&PacketryError::ModelError(e));
+                display_error(&PacketryError::Model(e));
             }
         });
         expander_wrapper.set_handler(handler);
@@ -128,16 +129,16 @@ fn create_view<Item: 'static, Model, RowData>(capture: &Arc<Mutex<Capture>>)
 
 #[derive(Error, Debug)]
 pub enum PacketryError {
-    #[error(transparent)]
-    CaptureError(#[from] CaptureError),
-    #[error(transparent)]
-    ModelError(#[from] ModelError),
-    #[error(transparent)]
-    PcapError(#[from] pcap::Error),
-    #[error(transparent)]
-    LunaError(#[from] crate::backend::luna::Error),
+    #[error("capture data error: {0}")]
+    Capture(#[from] CaptureError),
+    #[error("tree model error: {0}")]
+    Model(#[from] ModelError),
+    #[error("pcap error: {0}")]
+    Pcap(#[from] pcap::Error),
+    #[error("LUNA error: {0}")]
+    Luna(#[from] luna::Error),
     #[error("locking failed")]
-    LockError,
+    Lock,
     #[error("internal bug: {0}")]
     Bug(&'static str)
 }
@@ -161,7 +162,7 @@ fn activate(application: &Application) -> Result<(), PacketryError> {
 
     if args.len() > 1 {
         let mut pcap = pcap::Capture::from_file(&args[1])?;
-        let mut cap = capture.lock().or(Err(PacketryError::LockError))?;
+        let mut cap = capture.lock().or(Err(PacketryError::Lock))?;
         while let Ok(packet) = pcap.next() {
             decoder.handle_raw_packet(&mut cap, &packet)?;
         }
@@ -178,7 +179,7 @@ fn activate(application: &Application) -> Result<(), PacketryError> {
         let mut update_routine = move || -> Result<(), PacketryError> {
             use PacketryError::*;
 
-            let mut cap = update_capture.lock().or(Err(LockError))?;
+            let mut cap = update_capture.lock().or(Err(Lock))?;
 
             LUNA.with::<_, Result<(), PacketryError>>(|cell| {
                 let mut borrow = cell.borrow_mut();
@@ -252,7 +253,7 @@ fn activate(application: &Application) -> Result<(), PacketryError> {
 }
 
 fn display_error(e: &PacketryError) {
-    let message = format!("Error: {:?}", e);
+    let message = format!("{}", e);
     WINDOW.with(|win_opt| {
         match win_opt.borrow().as_ref() {
             None => println!("{}", message),
@@ -307,6 +308,6 @@ fn main() {
         }
     });
     if let Err(e) = stop_result {
-        display_error(&PacketryError::LunaError(e));
+        display_error(&PacketryError::Luna(e));
     }
 }
