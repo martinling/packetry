@@ -149,6 +149,7 @@ pub struct EndpointTraffic {
     pub transfer_index: HybridIndex<EndpointTransferId, EndpointTransactionId>,
     pub data_index: HybridIndex<EndpointTransactionId, EndpointByteCount>,
     pub total_data: EndpointByteCount,
+    pub first_item_id: Option<TrafficItemId>,
     pub end_index: HybridIndex<EndpointTransferId, TrafficItemId>,
 }
 
