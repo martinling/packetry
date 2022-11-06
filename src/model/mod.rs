@@ -4,12 +4,12 @@ mod imp;
 
 use std::sync::{Arc, Mutex};
 
-use gtk::prelude::ListModelExt;
+use gtk::prelude::{IsA, ListModelExt};
 use gtk::subclass::prelude::*;
 use gtk::{gio, glib};
 
 use crate::capture::{Capture, TrafficItem, DeviceItem};
-use crate::tree_list_model::{TreeListModel, ItemNodeRc, ModelError};
+use crate::tree_list_model::{TreeListModel, ItemNodeRc, ModelError, ModelUpdate};
 
 // Public part of the Model type.
 glib::wrapper! {
@@ -19,14 +19,25 @@ glib::wrapper! {
     pub struct DeviceModel(ObjectSubclass<imp::DeviceModel>) @implements gio::ListModel;
 }
 
+trait ApplyUpdate {
+    fn apply_update(&self, position: u32, update: ModelUpdate);
+}
+
+impl<T> ApplyUpdate for T where T: Sized + IsA<gio::ListModel> {
+    fn apply_update(&self, position: u32, update: ModelUpdate) {
+        let rows_removed = update.rows_removed + update.rows_changed;
+        let rows_added = update.rows_added + update.rows_changed;
+        self.items_changed(position, rows_removed, rows_added);
+    }
+}
+
 impl TrafficModel {
     pub fn update(&self) -> Result<(), ModelError> {
         let mut tree_opt  = self.imp().tree.borrow_mut();
         let tree = tree_opt.as_mut().unwrap();
         if let Some((position, update)) = tree.update()? {
-            let rows_removed = update.rows_removed + update.rows_changed;
-            let rows_added = update.rows_added + update.rows_changed;
-            self.items_changed(position, rows_removed, rows_added);
+            drop(tree_opt);
+            self.apply_update(position, update);
         }
         Ok(())
     }
@@ -59,9 +70,7 @@ impl GenericModel<TrafficItem> for TrafficModel {
         let tree_opt  = self.imp().tree.borrow();
         let tree = tree_opt.as_ref().unwrap();
         let update = tree.set_expanded(node, expanded)?;
-        let rows_removed = update.rows_removed + update.rows_changed;
-        let rows_added = update.rows_added + update.rows_changed;
-        self.items_changed(position + 1, rows_removed, rows_added);
+        self.apply_update(position + 1, update);
         Ok(())
     }
 }
@@ -84,9 +93,7 @@ impl GenericModel<DeviceItem> for DeviceModel {
         let tree_opt  = self.imp().tree.borrow();
         let tree = tree_opt.as_ref().unwrap();
         let update = tree.set_expanded(node, expanded)?;
-        let rows_removed = update.rows_removed + update.rows_changed;
-        let rows_added = update.rows_added + update.rows_changed;
-        self.items_changed(position + 1, rows_removed, rows_added);
+        self.apply_update(position + 1, update);
         Ok(())
     }
 }
