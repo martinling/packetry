@@ -133,6 +133,7 @@ pub struct EndpointWriter {
     pub transaction_ids: CompactWriter<EndpointTransactionId, TransactionId>,
     pub transfer_index: CompactWriter<EndpointTransferId, EndpointTransactionId>,
     pub data_index: CompactWriter<EndpointTransactionId, EndpointByteCount>,
+    pub progress_index: CompactWriter<TrafficItemIdOffset, EndpointTransactionId>,
     pub end_index: CompactWriter<EndpointTransferId, TrafficItemId>,
 }
 
@@ -143,6 +144,7 @@ pub struct EndpointReader {
     pub transaction_ids: CompactReader<EndpointTransactionId, TransactionId>,
     pub transfer_index: CompactReader<EndpointTransferId, EndpointTransactionId>,
     pub data_index: CompactReader<EndpointTransactionId, EndpointByteCount>,
+    pub progress_index: CompactReader<TrafficItemIdOffset, EndpointTransactionId>,
     pub end_index: CompactReader<EndpointTransferId, TrafficItemId>,
 }
 
@@ -154,6 +156,7 @@ pub fn create_endpoint()
     let (transactions_writer, transactions_reader) = compact_index()?;
     let (transfers_writer, transfers_reader) = compact_index()?;
     let (data_writer, data_reader) = compact_index()?;
+    let (progress_writer, progress_reader) = compact_index()?;
     let (end_writer, end_reader) = compact_index()?;
 
     // Create the shared state.
@@ -168,6 +171,7 @@ pub fn create_endpoint()
         transaction_ids: transactions_writer,
         transfer_index: transfers_writer,
         data_index: data_writer,
+        progress_index: progress_writer,
         end_index: end_writer,
     };
 
@@ -177,6 +181,7 @@ pub fn create_endpoint()
         transaction_ids: transactions_reader,
         transfer_index: transfers_reader,
         data_index: data_reader,
+        progress_index: progress_reader,
         end_index: end_reader,
     };
 
@@ -210,6 +215,7 @@ pub type DeviceId = Id<Device>;
 pub type EndpointId = Id<Endpoint>;
 pub type EndpointByteCount = u64;
 pub type DeviceVersion = u32;
+pub type TrafficItemIdOffset = u64;
 
 #[derive(Copy, Clone, Debug)]
 pub enum TrafficItem {
