@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::num::TryFromIntError;
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, Mutex};
 use std::ops::DerefMut;
@@ -13,8 +12,6 @@ use crate::capture::{Capture, CaptureError, ItemSource};
 pub enum ModelError {
     #[error(transparent)]
     CaptureError(#[from] CaptureError),
-    #[error(transparent)]
-    RangeError(#[from] TryFromIntError),
     #[error("Locking capture failed")]
     LockError,
     #[error("Node references a dropped parent")]
@@ -42,17 +39,17 @@ trait Node<Item> {
 
 struct Children<Item> {
     /// Number of direct children below this node.
-    direct_count: u32,
+    direct_count: u64,
 
     /// Total number nodes below this node, recursively.
-    total_count: u32,
+    total_count: u64,
 
     /// Expanded children of this item.
-    expanded: BTreeMap<u32, ItemNodeRc<Item>>,
+    expanded: BTreeMap<u64, ItemNodeRc<Item>>,
 }
 
 impl<Item> Children<Item> {
-    fn new(child_count: u32) -> Self {
+    fn new(child_count: u64) -> Self {
         Children {
             direct_count: child_count,
             total_count: child_count,
@@ -74,7 +71,7 @@ pub struct ItemNode<Item> {
     parent: Weak<RefCell<dyn Node<Item>>>,
 
     /// Index of this node below the parent Item.
-    item_index: u32,
+    item_index: u64,
 
     /// Children of this item.
     children: Children<Item>,
@@ -87,7 +84,7 @@ impl<Item> Children<Item> {
     }
 
     /// Iterate over the expanded children.
-    fn iter_expanded(&self) -> impl Iterator<Item=(&u32, &ItemNodeRc<Item>)> + '_ {
+    fn iter_expanded(&self) -> impl Iterator<Item=(&u64, &ItemNodeRc<Item>)> + '_ {
         self.expanded.iter()
     }
 
@@ -176,9 +173,9 @@ impl<Item> ItemNode<Item> where Item: Copy {
 }
 
 pub struct ModelUpdate {
-    pub rows_added: u32,
-    pub rows_removed: u32,
-    pub rows_changed: u32,
+    pub rows_added: u64,
+    pub rows_removed: u64,
+    pub rows_changed: u64,
 }
 
 pub struct TreeListModel<Item> {
@@ -193,16 +190,15 @@ where Item: 'static + Copy,
     pub fn new(capture: Arc<Mutex<Capture>>) -> Result<Self, ModelError> {
         let mut cap = capture.lock().or(Err(ModelError::LockError))?;
         let item_count = cap.item_count(&None)?;
-        let child_count = u32::try_from(item_count)?;
         Ok(TreeListModel {
             capture: capture.clone(),
             root: Rc::new(RefCell::new(RootNode {
-                children: Children::new(child_count),
+                children: Children::new(item_count),
             })),
         })
     }
 
-    pub fn row_count(&self) -> u32 {
+    pub fn row_count(&self) -> u64 {
         self.root.borrow().children.total_count
     }
 
@@ -245,12 +241,12 @@ where Item: 'static + Copy,
         })
     }
 
-    pub fn update(&mut self) -> Result<Option<(u32, ModelUpdate)>, ModelError> {
+    pub fn update(&mut self) -> Result<Option<(u64, ModelUpdate)>, ModelError> {
         let mut cap = self.capture.lock().or(Err(ModelError::LockError))?;
 
         let mut node_borrow = self.root.borrow_mut();
 
-        let new_child_count = cap.item_count(&None)? as u32;
+        let new_child_count = cap.item_count(&None)?;
         if node_borrow.children.direct_count == new_child_count {
             return Ok(None);
         }
@@ -266,7 +262,7 @@ where Item: 'static + Copy,
         Ok(Some((position, update)))
     }
 
-    pub fn fetch(&self, position: u32) -> Result<ItemNodeRc<Item>, ModelError> {
+    pub fn fetch(&self, position: u64) -> Result<ItemNodeRc<Item>, ModelError> {
         // First check that the position is valid (must be within the root node's `children.total_count`).
         let mut parent_ref: Rc<RefCell<dyn Node<Item>>> = self.root.clone();
         let mut relative_position = position;
@@ -301,13 +297,13 @@ where Item: 'static + Copy,
         // If we've broken out to this point, the node must be directly below `parent` - look it up.
         let mut cap = self.capture.lock().or(Err(ModelError::LockError))?;
         let parent = parent_ref.borrow();
-        let item = cap.item(&parent.item(), relative_position as u64)?;
+        let item = cap.item(&parent.item(), relative_position)?;
         let child_count = cap.child_count(&item)?;
         let node = ItemNode {
             item,
             parent: Rc::downgrade(&parent_ref),
             item_index: relative_position,
-            children: Children::new(child_count.try_into()?),
+            children: Children::new(child_count),
         };
 
         Ok(Rc::new(RefCell::new(node)))

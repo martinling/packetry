@@ -2,6 +2,7 @@
 
 mod imp;
 
+use std::cmp::min;
 use std::sync::{Arc, Mutex};
 
 use gtk::prelude::{IsA, ListModelExt};
@@ -20,14 +21,28 @@ glib::wrapper! {
 }
 
 trait ApplyUpdate {
-    fn apply_update(&self, position: u32, update: ModelUpdate);
+    fn apply_update(&self, position: u64, update: ModelUpdate);
+}
+
+const MAX_ROWS: u64 = u32::MAX as u64;
+
+fn clamp(value: u64, max: u64) -> u32 {
+    min(value, max) as u32
 }
 
 impl<T> ApplyUpdate for T where T: Sized + IsA<gio::ListModel> {
-    fn apply_update(&self, position: u32, update: ModelUpdate) {
-        let rows_removed = update.rows_removed + update.rows_changed;
-        let rows_added = update.rows_added + update.rows_changed;
-        self.items_changed(position, rows_removed, rows_added);
+    fn apply_update(&self, position: u64, update: ModelUpdate) {
+        let rows_addressable = MAX_ROWS - position as u64;
+        let rows_removed = clamp(
+            update.rows_removed + update.rows_changed,
+            rows_addressable);
+        let rows_added = clamp(
+            update.rows_added + update.rows_changed,
+            rows_addressable);
+        self.items_changed(
+            position as u32,
+            rows_removed as u32,
+            rows_added as u32);
     }
 }
 
@@ -70,7 +85,7 @@ impl GenericModel<TrafficItem> for TrafficModel {
         let tree_opt  = self.imp().tree.borrow();
         let tree = tree_opt.as_ref().unwrap();
         let update = tree.set_expanded(node, expanded)?;
-        self.apply_update(position + 1, update);
+        self.apply_update(position as u64 + 1, update);
         Ok(())
     }
 }
@@ -93,7 +108,7 @@ impl GenericModel<DeviceItem> for DeviceModel {
         let tree_opt  = self.imp().tree.borrow();
         let tree = tree_opt.as_ref().unwrap();
         let update = tree.set_expanded(node, expanded)?;
-        self.apply_update(position + 1, update);
+        self.apply_update(position as u64 + 1, update);
         Ok(())
     }
 }
