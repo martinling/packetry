@@ -86,7 +86,7 @@ impl GenericModel<TrafficItem> for TrafficModel {
             .borrow_mut()
             .as_mut()
             .unwrap()
-            .set_expanded(node, expanded)?;
+            .set_expanded(node, position as u64, expanded)?;
         self.apply_update(position as u64 + 1, update);
         Ok(())
     }
@@ -111,7 +111,7 @@ impl GenericModel<DeviceItem> for DeviceModel {
             .borrow_mut()
             .as_mut()
             .unwrap()
-            .set_expanded(node, expanded)?;
+            .set_expanded(node, position as u64, expanded)?;
         self.apply_update(position as u64 + 1, update);
         Ok(())
     }
