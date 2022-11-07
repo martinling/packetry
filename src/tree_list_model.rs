@@ -46,10 +46,7 @@ trait Node<Item> {
 
 struct Children<Item> {
     /// Number of direct children below this node.
-    direct_count: u64,
-
-    /// Total number nodes below this node, recursively.
-    total_count: u64,
+    count: u64,
 
     /// Expanded children of this item.
     expanded: BTreeMap<u64, ItemNodeRc<Item>>,
@@ -58,8 +55,7 @@ struct Children<Item> {
 impl<Item> Children<Item> {
     fn new(child_count: u64) -> Self {
         Children {
-            direct_count: child_count,
-            total_count: child_count,
+            count: child_count,
             expanded: BTreeMap::new()
         }
     }
@@ -158,7 +154,7 @@ impl<Item> ItemNode<Item> where Item: Copy + 'static {
     }
 
     pub fn expandable(&self) -> bool {
-        self.children.total_count != 0
+        self.children.count != 0
     }
 
     #[allow(clippy::type_complexity)]
@@ -286,7 +282,7 @@ where Item: 'static + Copy + Debug,
     }
 
     pub fn row_count(&self) -> u64 {
-        self.root.borrow().children.total_count
+        self.total_rows
     }
 
     pub fn set_expanded(&mut self,
@@ -373,8 +369,7 @@ where Item: 'static + Copy + Debug,
                     parent: Rc::downgrade(parent_rc),
                     item_index: index,
                     children: Children {
-                        direct_count: child_count,
-                        total_count: child_count,
+                        count: child_count,
                         expanded: BTreeMap::new()
                     }
                 }))
@@ -420,7 +415,7 @@ where Item: 'static + Copy + Debug,
             Region {
                 source: ChildrenOf(node_ref.clone()),
                 offset: 0,
-                length: node_ref.borrow().children.direct_count,
+                length: node_ref.borrow().children.count,
             },
             vec![Region {
                 source: parent.source.clone(),
@@ -438,7 +433,7 @@ where Item: 'static + Copy + Debug,
         self.merge_regions();
 
         // Update total row count.
-        self.root.borrow_mut().children.total_count += update.rows_added;
+        self.total_rows += update.rows_added;
 
         Ok(update)
     }
@@ -476,7 +471,7 @@ where Item: 'static + Copy + Debug,
                 }
                 ModelUpdate {
                     rows_added: 0,
-                    rows_removed: node_ref.borrow().children.direct_count,
+                    rows_removed: node_ref.borrow().children.count,
                     rows_changed: 0,
                 }
             }
@@ -491,7 +486,7 @@ where Item: 'static + Copy + Debug,
         self.merge_regions();
 
         // Update total row count.
-        self.root.borrow_mut().children.total_count -= update.rows_removed;
+        self.total_rows -= update.rows_removed;
 
         Ok(update)
     }
@@ -624,21 +619,21 @@ where Item: 'static + Copy + Debug,
 
         let mut root = self.root.borrow_mut();
         let new_item_count = cap.item_count(&None)?;
-        let old_item_count = root.children.direct_count;
+        let old_item_count = root.children.count;
 
         if new_item_count == old_item_count {
             return Ok(None);
         }
 
-        let position = root.children.total_count;
+        let position = self.total_rows;
         let update = ModelUpdate {
             rows_added: new_item_count - old_item_count,
             rows_removed: 0,
             rows_changed: 0,
         };
 
-        root.children.direct_count = new_item_count;
-        root.children.total_count += update.rows_added;
+        root.children.count = new_item_count;
+        self.total_rows += update.rows_added;
 
         drop(root);
         drop(cap);
