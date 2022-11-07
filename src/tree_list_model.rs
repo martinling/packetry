@@ -34,9 +34,6 @@ trait Node<Item> {
     /// Item at this node, or None if the root.
     fn item(&self) -> Option<Item>;
 
-    /// Parent of this node, or None if the root.
-    fn parent(&self) -> Result<Option<AnyNodeRc<Item>>, ModelError>;
-
     /// Access the expanded children of this node.
     fn children(&self) -> &Children<Item>;
 
@@ -102,10 +99,6 @@ impl<Item> Node<Item> for RootNode<Item> {
         None
     }
 
-    fn parent(&self) -> Result<Option<AnyNodeRc<Item>>, ModelError> {
-        Ok(None)
-    }
-
     fn children(&self) -> &Children<Item> {
         &self.children
     }
@@ -118,10 +111,6 @@ impl<Item> Node<Item> for RootNode<Item> {
 impl<Item> Node<Item> for ItemNode<Item> where Item: Copy {
     fn item(&self) -> Option<Item> {
         Some(self.item)
-    }
-
-    fn parent(&self) -> Result<Option<AnyNodeRc<Item>>, ModelError> {
-        Ok(Some(self.parent.upgrade().ok_or(ModelError::ParentDropped)?))
     }
 
     fn children(&self) -> &Children<Item> {
