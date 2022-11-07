@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::fmt::Debug;
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, Mutex};
 use std::ops::DerefMut;
@@ -176,6 +177,15 @@ pub struct ModelUpdate {
     pub rows_added: u64,
     pub rows_removed: u64,
     pub rows_changed: u64,
+}
+
+impl Debug for ModelUpdate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>)
+        -> Result<(), std::fmt::Error>
+    {
+        write!(f, "{} added, {} removed, {} changed",
+            self.rows_added, self.rows_removed, self.rows_changed)
+    }
 }
 
 pub struct TreeListModel<Item> {
