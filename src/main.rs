@@ -49,7 +49,7 @@ mod hybrid_index;
 mod usb;
 mod vec_map;
 
-#[cfg(feature="record-ui-test")]
+#[cfg(any(test, feature="record-ui-test"))]
 mod record_ui;
 
 #[cfg(feature="record-ui-test")]
@@ -390,4 +390,53 @@ fn main() {
             }
         )
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs::File;
+    use std::sync::{Arc, Mutex};
+
+    use pcap_file::pcap::PcapReader;
+
+    use crate::capture::{Capture, TrafficItem, DeviceItem};
+    use crate::decoder::Decoder;
+    use crate::model::{GenericModel, TrafficModel, DeviceModel};
+    use crate::record_ui::check_replay;
+    use crate::row_data::{TrafficRowData, DeviceRowData};
+
+    #[test]
+    fn test_replay() {
+        let test_dir = "./tests/ui/";
+        for result in std::fs::read_dir(test_dir).unwrap() {
+            let entry = result.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                let path = entry.path();
+                let mut cap_path = path.clone();
+                let mut traffic_path = path.clone();
+                let mut devices_path = path.clone();
+                cap_path.push("capture.pcap");
+                traffic_path.push("traffic-log.json");
+                devices_path.push("devices-log.json");
+                let pcap_file = File::open(cap_path).unwrap();
+                let pcap_reader = PcapReader::new(pcap_file).unwrap();
+                let mut cap = Capture::new().unwrap();
+                let mut decoder = Decoder::new(&mut cap).unwrap();
+                for result in pcap_reader {
+                    let packet = result.unwrap().data;
+                    decoder.handle_raw_packet(&mut cap, &packet).unwrap();
+                }
+                drop(decoder);
+                let capture = Arc::new(Mutex::new(cap));
+                let traffic_model =
+                    TrafficModel::new(capture.clone()).unwrap();
+                let devices_model =
+                    DeviceModel::new(capture.clone()).unwrap();
+                check_replay::<TrafficModel, TrafficRowData, TrafficItem>(
+                    &traffic_model, &traffic_path);
+                check_replay::<DeviceModel, DeviceRowData, DeviceItem>(
+                    &devices_model, &devices_path);
+            }
+        }
+    }
 }
