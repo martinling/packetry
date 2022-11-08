@@ -81,12 +81,12 @@ impl GenericModel<TrafficItem> for TrafficModel {
     }
 
     fn update(&self) -> Result<(), ModelError> {
-        let update_opt = self.imp().tree
+        let updates = self.imp().tree
             .borrow_mut()
             .as_mut()
             .unwrap()
             .update()?;
-        if let Some((position, update)) = update_opt {
+        for (position, update) in updates {
             self.apply_update(position, update);
         }
         Ok(())
@@ -118,12 +118,12 @@ impl GenericModel<DeviceItem> for DeviceModel {
     }
 
     fn update(&self) -> Result<(), ModelError> {
-        let update_opt = self.imp().tree
+        let updates = self.imp().tree
             .borrow_mut()
             .as_mut()
             .unwrap()
             .update()?;
-        if let Some((position, update)) = update_opt {
+        for (position, update) in updates {
             self.apply_update(position, update);
         }
         Ok(())
