@@ -31,20 +31,6 @@ impl<T> ApplyUpdate for T where T: Sized + IsA<gio::ListModel> {
     }
 }
 
-impl TrafficModel {
-    pub fn update(&self) -> Result<(), ModelError> {
-        let update_opt = self.imp().tree
-            .borrow_mut()
-            .as_mut()
-            .unwrap()
-            .update()?;
-        if let Some((position, update)) = update_opt {
-            self.apply_update(position, update);
-        }
-        Ok(())
-    }
-}
-
 pub trait GenericModel<Item> where Self: Sized {
     fn new(capture: Arc<Mutex<Capture>>) -> Result<Self, ModelError>;
     fn set_expanded(&self,
@@ -52,6 +38,7 @@ pub trait GenericModel<Item> where Self: Sized {
                     position: u32,
                     expanded: bool)
         -> Result<(), ModelError>;
+    fn update(&self) -> Result<(), ModelError>;
 }
 
 impl GenericModel<TrafficItem> for TrafficModel {
@@ -77,6 +64,18 @@ impl GenericModel<TrafficItem> for TrafficModel {
         self.apply_update(position + 1, update);
         Ok(())
     }
+
+    fn update(&self) -> Result<(), ModelError> {
+        let update_opt = self.imp().tree
+            .borrow_mut()
+            .as_mut()
+            .unwrap()
+            .update()?;
+        if let Some((position, update)) = update_opt {
+            self.apply_update(position, update);
+        }
+        Ok(())
+    }
 }
 
 impl GenericModel<DeviceItem> for DeviceModel {
@@ -100,6 +99,18 @@ impl GenericModel<DeviceItem> for DeviceModel {
             .unwrap()
             .set_expanded(node, position, expanded)?;
         self.apply_update(position + 1, update);
+        Ok(())
+    }
+
+    fn update(&self) -> Result<(), ModelError> {
+        let update_opt = self.imp().tree
+            .borrow_mut()
+            .as_mut()
+            .unwrap()
+            .update()?;
+        if let Some((position, update)) = update_opt {
+            self.apply_update(position, update);
+        }
         Ok(())
     }
 }
