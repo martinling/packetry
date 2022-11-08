@@ -4,12 +4,19 @@ use std::collections::btree_map::Entry;
 use std::fmt::Debug;
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::ops::DerefMut;
+use std::ops::{DerefMut, Range};
 
 use itertools::Itertools;
 use thiserror::Error;
 
-use crate::capture::{Capture, CaptureError, ItemSource};
+use crate::capture::{
+    Capture,
+    CaptureError,
+    ItemSource,
+    SearchResult,
+    CompletionStatus
+};
+use crate::id::HasLength;
 
 #[derive(Error, Debug)]
 pub enum ModelError {
@@ -73,6 +80,9 @@ pub struct ItemNode<Item> {
     /// Index of this node below the parent Item.
     item_index: u64,
 
+    /// Completion status of this item.
+    completion: CompletionStatus,
+
     /// Children of this item.
     children: Children<Item>,
 }
@@ -81,6 +91,11 @@ impl<Item> Children<Item> {
     /// Whether this child is expanded.
     fn expanded(&self, node: &ItemNode<Item>) -> bool {
         self.expanded.contains_key(&node.item_index)
+    }
+
+    /// Get the expanded child with the given index.
+    fn get_expanded(&self, index: u64) -> Option<ItemNodeRc<Item>> {
+        self.expanded.get(&index).map(Rc::clone)
     }
 
     /// Set whether this child of the owning node is expanded.
@@ -171,6 +186,7 @@ impl<Item> ItemNode<Item> where Item: Copy + 'static {
 enum Source<Item> {
     TopLevelItems(),
     ChildrenOf(ItemNodeRc<Item>),
+    InterleavedSearch(Vec<ItemNodeRc<Item>>, Range<u64>),
 }
 
 use Source::*;
@@ -194,9 +210,23 @@ where Item: Clone + Debug
                 write!(f, "Top level items"),
             ChildrenOf(rc) =>
                 write!(f, "Children of {:?}", rc.borrow().item),
+            InterleavedSearch(expanded, range) =>
+                write!(f, "Interleaved search in {:?} from {:?}",
+                    range,
+                    expanded
+                        .iter()
+                        .map(|rc| rc.borrow().item.clone())
+                        .collect::<Vec<Item>>()),
         }?;
         write!(f, ", offset {}, length {}", self.offset, self.length)
     }
+}
+
+fn same_expanded<Item>(a: &[ItemNodeRc<Item>], b: &[ItemNodeRc<Item>]) -> bool {
+    a.len() == b.len() &&
+        a.iter()
+            .zip(b.iter())
+            .all(|(a, b)| Rc::ptr_eq(a, b))
 }
 
 impl<Item> Region<Item> where Item: Clone {
@@ -205,6 +235,17 @@ impl<Item> Region<Item> where Item: Clone {
         region_b: &Region<Item>
     ) -> Option<Region<Item>> {
         match (&region_a.source, &region_b.source) {
+            (InterleavedSearch(exp_a, range_a),
+             InterleavedSearch(exp_b, range_b))
+                if same_expanded(exp_a, exp_b) => Some(
+                    Region {
+                        source: InterleavedSearch(
+                            exp_a.clone(),
+                            range_a.start..range_b.end),
+                        offset: region_a.offset,
+                        length: region_a.length + region_b.length,
+                    }
+                ),
             (ChildrenOf(a_ref), ChildrenOf(b_ref))
                 if Rc::ptr_eq(a_ref, b_ref) => Some(
                     Region {
@@ -281,6 +322,10 @@ where Item: 'static + Copy + Debug,
 
     pub fn row_count(&self) -> u64 {
         self.total_rows
+    }
+
+    fn item_count(&self) -> u64 {
+        self.root.borrow().children().count
     }
 
     pub fn set_expanded(&mut self,
@@ -366,6 +411,7 @@ where Item: 'static + Copy + Debug,
                     item,
                     parent: Rc::downgrade(parent_rc),
                     item_index: index,
+                    completion: cap.item_end(&item, index)?,
                     children: Children {
                         count: child_count,
                         expanded: BTreeMap::new()
@@ -375,11 +421,109 @@ where Item: 'static + Copy + Debug,
         })
     }
 
+    fn node_range(&self, node_ref: &ItemNodeRc<Item>) -> Range<u64> {
+        use CompletionStatus::*;
+        let node = node_ref.borrow();
+        let start = node.item_index;
+        let end = match node.completion {
+            InterleavedComplete(index) => index,
+            InterleavedOngoing() => self.item_count(),
+            _ => start,
+        };
+        start..end
+    }
+
+    fn adapt_expanded<'exp>(&self, expanded_rcs: &'exp [ItemNodeRc<Item>])
+        -> impl Iterator<Item=(u64, Item)> + 'exp
+    {
+        expanded_rcs.iter().map(|node_rc| {
+            let node = node_rc.borrow();
+            (node.item_index, node.item)
+        })
+    }
+
+    fn count_to_item(&self,
+                     expanded: &[ItemNodeRc<Item>],
+                     range: &Range<u64>,
+                     to_index: u64,
+                     node_ref: &ItemNodeRc<Item>)
+        -> Result<u64, ModelError>
+    {
+        use SearchResult::*;
+        let node = node_ref.borrow();
+        let item_index = node.item_index;
+        let item = &node.item;
+        let mut expanded = self.adapt_expanded(expanded);
+        let mut cap = self.capture.lock().or(Err(LockError))?;
+        let search_result = cap.find_child(&mut expanded, range, to_index);
+        Ok(match search_result {
+            Ok(TopLevelItem(found_index, _)) => {
+                let range_to_item = range.start..found_index;
+                cap.count_within(item_index, item, &range_to_item)?
+            },
+            Ok(NextLevelItem(span_index, .., child)) => {
+                let range_to_span = range.start..span_index;
+                cap.count_within(item_index, item, &range_to_span)? +
+                    cap.count_before(item_index, item, span_index, &child)?
+            },
+            Err(_) => cap.count_within(item_index, item, range)?
+        })
+    }
+
+    fn count_around_offset(&self,
+                           expanded: &[ItemNodeRc<Item>],
+                           range: &Range<u64>,
+                           node_ref: &ItemNodeRc<Item>,
+                           offset: u64,
+                           end: u64)
+        -> Result<(u64, u64), ModelError>
+    {
+        let length = range.len() - 1 + self.count_within(expanded, range)?;
+        let rows_before_offset =
+            if offset == 0 {
+                0
+            } else {
+                self.count_to_item(expanded, range, offset - 1, node_ref)?
+            };
+        let rows_before_end =
+            if end == 0 {
+                0
+            } else if end == length {
+                self.count_within(&[node_ref.clone()], range)?
+            } else {
+                self.count_to_item(expanded, range, end - 1, node_ref)?
+            };
+        let rows_after_offset = rows_before_end - rows_before_offset;
+        Ok((rows_before_offset, rows_after_offset))
+    }
+
+    fn count_within(&self,
+                    expanded: &[ItemNodeRc<Item>],
+                    range: &Range<u64>)
+        -> Result<u64, ModelError>
+    {
+        let mut cap = self.capture.lock().or(Err(LockError))?;
+        Ok(self
+            .adapt_expanded(expanded)
+            .map(|(index, item)| cap.count_within(index, &item, range))
+            .collect::<Result<Vec<u64>, CaptureError>>()?
+            .iter()
+            .sum())
+    }
+
     fn expand(&mut self,
               position: u64,
               node_ref: &ItemNodeRc<Item>)
         -> Result<ModelUpdate, ModelError>
     {
+        // Extract some details of the node being expanded.
+        use CompletionStatus::*;
+        let node = node_ref.borrow();
+        let node_start = node.item_index;
+        let interleaved =
+            matches!(node.completion,
+                     InterleavedComplete(_) | InterleavedOngoing());
+
         // Find the start of the parent region.
         let (&parent_start, _) = self.regions
             .range(..position)
@@ -399,28 +543,131 @@ where Item: 'static + Copy + Debug,
                     "Parent not found at position {}", parent_start)))?;
 
         // Remove all following regions, to iterate over later.
-        let following_regions = self.regions
+        let mut following_regions = self.regions
             .split_off(&parent_start)
             .into_iter();
 
         // Split the parent region and construct a new region between.
-        let update = self.split_parent(parent_start, &parent, node_ref,
-            vec![Region {
-                source: parent.source.clone(),
-                offset: parent.offset,
-                length: relative_position,
-            }],
-            Region {
-                source: ChildrenOf(node_ref.clone()),
-                offset: 0,
-                length: node_ref.borrow().children.count,
+        //
+        // Where the new region is an interleaved one, its overlap with the
+        // remainder of the parent is handled in the split_parent call.
+        let mut update = match (interleaved, &parent.source) {
+            // Self-contained region expanded.
+            (false, _) => {
+                self.split_parent(parent_start, &parent, node_ref,
+                    vec![Region {
+                        source: parent.source.clone(),
+                        offset: parent.offset,
+                        length: relative_position,
+                    }],
+                    Region {
+                        source: ChildrenOf(node_ref.clone()),
+                        offset: 0,
+                        length: node.children.count,
+                    },
+                    vec![Region {
+                        source: parent.source.clone(),
+                        offset: parent.offset + relative_position,
+                        length: parent.length - relative_position,
+                    }]
+                )?
             },
-            vec![Region {
-                source: parent.source.clone(),
-                offset: parent.offset + relative_position,
-                length: parent.length - relative_position,
-            }]
-        )?;
+            // Last top level item in a region expanded, but not the last item
+            // of the whole model. There must be a following interleaved region,
+            // which will be updated later.
+            (true, TopLevelItems())
+                if (relative_position == parent.length) &&
+                    (parent.offset + relative_position != self.item_count()) =>
+            {
+                let mut update = ModelUpdate::default();
+                self.preserve_region(
+                    &mut update, parent_start, &parent, false)?;
+                update
+            },
+            // Interleaved region expanded from within a root region.
+            (true, TopLevelItems()) => {
+                let expanded = vec![node_ref.clone()];
+                let range = node_start..(node_start + 1);
+                let added = self.count_within(&expanded, &range)?;
+                self.split_parent(parent_start, &parent, node_ref,
+                    vec![Region {
+                        source: TopLevelItems(),
+                        offset: parent.offset,
+                        length: relative_position,
+                    }],
+                    Region {
+                        source: InterleavedSearch(expanded, range),
+                        offset: 0,
+                        length: added,
+                    },
+                    vec![Region {
+                        source: TopLevelItems(),
+                        offset: parent.offset + relative_position,
+                        length: parent.length - relative_position,
+                    }]
+                )?
+            },
+            // New interleaved region expanded from within an existing one.
+            (true, InterleavedSearch(parent_expanded, parent_range)) => {
+                assert!(parent.offset == 0);
+                let mut expanded = parent_expanded.clone();
+                expanded.push(node_ref.clone());
+                let range_1 = parent_range.start..node_start;
+                let range_2 = node_start..(node_start + 1);
+                let range_3 = range_2.end..parent_range.end;
+                let changed = self.count_within(parent_expanded, &range_2)?;
+                let added = self.count_within(&[node_ref.clone()], &range_2)?;
+                self.split_parent(parent_start, &parent, node_ref,
+                    vec![Region {
+                        source: InterleavedSearch(parent_expanded.clone(), range_1),
+                        offset: 0,
+                        length: relative_position - 1,
+                    },
+                    Region {
+                        source: TopLevelItems(),
+                        offset: node_start,
+                        length: 1,
+                    }],
+                    Region {
+                        source: InterleavedSearch(expanded, range_2),
+                        offset: 0,
+                        length: changed + added,
+                    },
+                    if relative_position + changed == parent.length {
+                        vec![]
+                    } else {
+                        vec![Region {
+                            source: TopLevelItems(),
+                            offset: node_start + 1,
+                            length: 1,
+                        },
+                        Region {
+                            source:
+                                InterleavedSearch(parent_expanded.clone(), range_3),
+                            offset: 0,
+                            length:
+                                parent.length - relative_position - changed - 1,
+                        }]
+                    }
+                )?
+            },
+            // Other combinations are not supported.
+            (..) => return
+                Err(InternalError(format!(
+                    "Unable to expand from {:?}", parent)))
+        };
+
+        // For an interleaved source, update all regions that it overlaps.
+        if interleaved {
+            for (start, region) in following_regions.by_ref() {
+                // Do whatever is necessary to overlap this region.
+                if !self.overlap_region(&mut update, start, &region, node_ref)?
+                {
+                    // No further overlapping regions.
+                    break;
+                }
+            }
+        }
 
         // Shift all remaining regions down by the added rows.
         for (start, region) in following_regions {
@@ -472,6 +719,20 @@ where Item: 'static + Copy + Debug,
                     rows_removed: node_ref.borrow().children.count,
                     rows_changed: 0,
                 }
+            },
+            // For an interleaved source, update all overlapped regions.
+            InterleavedSearch(..) => {
+                let mut update = ModelUpdate::default();
+                for (start, region) in following_regions.by_ref() {
+                    // Do whatever is necessary to unoverlap this region.
+                    if !self.unoverlap_region(
+                        &mut update, start, &region, node_ref)?
+                    {
+                        // No further overlapping regions.
+                        break;
+                    }
+                }
+                update
             }
         };
 
@@ -487,6 +748,226 @@ where Item: 'static + Copy + Debug,
         self.total_rows -= update.rows_removed;
 
         Ok(update)
+    }
+
+    fn overlap_region(&mut self,
+                      update: &mut ModelUpdate,
+                      start: u64,
+                      region: &Region<Item>,
+                      node_ref: &ItemNodeRc<Item>)
+        -> Result<bool, ModelError>
+    {
+        use Source::*;
+
+        let node_range = self.node_range(node_ref);
+
+        Ok(match &region.source {
+            TopLevelItems() if region.offset >= node_range.end => {
+                // This region is not overlapped.
+                self.preserve_region(update, start, region, false)?
+            },
+            InterleavedSearch(_, range) if range.start >= node_range.end => {
+                // This region is not overlapped.
+                self.preserve_region(update, start, region, false)?
+            },
+            ChildrenOf(_) => {
+                // This region is overlapped but self-contained.
+                self.preserve_region(update, start, region, true)?
+            },
+            TopLevelItems() if region.length == 1 => {
+                // This region includes only a single root item, and does
+                // not need to be translated to an interleaved one.
+                self.preserve_region(update, start, region, true)?
+            },
+            TopLevelItems() if region.offset + region.length == node_range.end &&
+                node_range.end == self.item_count() =>
+            {
+                // This region is fully overlapped and runs to the end
+                // of the model, not just the last item.
+                let expanded = vec![node_ref.clone()];
+                let range = region.offset..self.item_count();
+                let changed = range.len() - 1;
+                let added = self.count_within(&expanded, &range)?;
+                self.replace_region(update, start, region,
+                    vec![Region {
+                        source: TopLevelItems(),
+                        offset: region.offset,
+                        length: 1,
+                    },
+                    Region {
+                        source: InterleavedSearch(expanded, range),
+                        offset: 0,
+                        length: changed + added,
+                    }]
+                )?;
+                true
+            }
+            TopLevelItems() if region.offset + region.length <= node_range.end => {
+                // This region is fully overlapped by the new node.
+                // Replace with a new interleaved region.
+                let expanded = vec![node_ref.clone()];
+                let range = region.offset..(region.offset + region.length - 1);
+                let added = self.count_within(&expanded, &range)?;
+                self.replace_region(update, start, region,
+                    vec![Region {
+                        source: TopLevelItems(),
+                        offset: region.offset,
+                        length: 1,
+                    },
+                    Region {
+                        source: InterleavedSearch(expanded, range),
+                        offset: 0,
+                        length: region.length - 2 + added,
+                    },
+                    Region {
+                        source: TopLevelItems(),
+                        offset: region.offset + region.length - 1,
+                        length: 1
+                    }]
+                )?;
+                true
+            },
+            TopLevelItems() => {
+                // This region is partially overlapped by the new node.
+                // Split it into overlapped and unoverlapped parts.
+                let expanded = vec![node_ref.clone()];
+                let range = region.offset..node_range.end;
+                let changed = range.len() - 1;
+                let added = self.count_within(&expanded, &range)?;
+                self.partial_overlap(update, start, region,
+                    vec![Region {
+                        source: TopLevelItems(),
+                        offset: region.offset,
+                        length: 1,
+                    },
+                    Region {
+                        source: InterleavedSearch(expanded, range),
+                        offset: 0,
+                        length: changed + added
+                    }],
+                    vec![Region {
+                        source: TopLevelItems(),
+                        offset: region.offset + changed + 1,
+                        length: region.length - changed - 1,
+                    }]
+                )?;
+                // No longer overlapping.
+                false
+            },
+            InterleavedSearch(expanded, range) if range.end <= node_range.end => {
+                // This region is fully overlapped by the new node.
+                // Replace with a new interleaved region.
+                let (added_before_offset, added_after_offset) =
+                    self.count_around_offset(
+                        expanded, range, node_ref,
+                        region.offset,
+                        region.offset + region.length)?;
+                let mut more_expanded = expanded.clone();
+                more_expanded.push(node_ref.clone());
+                self.replace_region(update, start, region,
+                    vec![Region {
+                        source: InterleavedSearch(more_expanded, range.clone()),
+                        offset: region.offset + added_before_offset,
+                        length: region.length + added_after_offset,
+                    }]
+                )?;
+                true
+            },
+            InterleavedSearch(expanded, range) => {
+                // This region may be partially overlapped by the new node,
+                // depending on its offset within its source rows.
+                let first_range = range.start..node_range.end;
+                let second_range = node_range.end..range.end;
+                // Work out the offset at which this source would be split.
+                let split_offset = first_range.len() - 1 +
+                    self.count_within(expanded, &first_range)?;
+                if region.offset > split_offset {
+                    // This region begins after the split, so isn't overlapped.
+                    self.preserve_region(update, start, region, false)?
+                } else {
+                    // Split the region into overlapped and unoverlapped parts.
+                    let (added_before_offset, added_after_offset) =
+                        self.count_around_offset(
+                            expanded, range, node_ref,
+                            region.offset, split_offset)?;
+                    let mut more_expanded = expanded.clone();
+                    more_expanded.push(node_ref.clone());
+                    self.partial_overlap(update, start, region,
+                        vec![Region {
+                            source: InterleavedSearch(more_expanded, first_range),
+                            offset: region.offset + added_before_offset,
+                            length: split_offset + added_after_offset,
+                        }],
+                        vec![Region {
+                            source: TopLevelItems(),
+                            offset: node_range.end,
+                            length: 1,
+                        },
+                        Region {
+                            source: InterleavedSearch(expanded.clone(), second_range),
+                            offset: 0,
+                            length: region.length - split_offset - 1,
+                        }]
+                    )?;
+                    // No longer overlapping.
+                    false
+                }
+            }
+        })
+    }
+
+    fn unoverlap_region(&mut self,
+                        update: &mut ModelUpdate,
+                        start: u64,
+                        region: &Region<Item>,
+                        node_ref: &ItemNodeRc<Item>)
+        -> Result<bool, ModelError>
+    {
+        use Source::*;
+
+        let node_range = self.node_range(node_ref);
+
+        Ok(match &region.source {
+            TopLevelItems() if region.offset >= node_range.end => {
+                // This region is not overlapped.
+                self.preserve_region(update, start, region, false)?
+            },
+            InterleavedSearch(_, range) if range.start >= node_range.end => {
+                // This region is not overlapped.
+                self.preserve_region(update, start, region, false)?
+            },
+            ChildrenOf(_) | TopLevelItems() => {
+                // This region is overlapped but self-contained.
+                self.preserve_region(update, start, region, true)?
+            },
+            InterleavedSearch(expanded, range) => {
+                // This region is overlapped. Replace with a new one.
+                let mut less_expanded = expanded.to_vec();
+                less_expanded.retain(|rc| !Rc::ptr_eq(rc, node_ref));
+                let new_region = if less_expanded.is_empty() {
+                    // This node was the last expanded one in this region.
+                    Region {
+                        source: TopLevelItems(),
+                        offset: range.start + 1,
+                        length: range.len() - 1,
+                    }
+                } else {
+                    // There are other nodes expanded in this region.
+                    let (removed_before_offset, removed_after_offset) =
+                        self.count_around_offset(
+                            expanded, range, node_ref,
+                            region.offset,
+                            region.offset + region.length)?;
+                    Region {
+                        source: InterleavedSearch(less_expanded, range.clone()),
+                        offset: region.offset - removed_before_offset,
+                        length: region.length - removed_after_offset,
+                    }
+                };
+                self.replace_region(update, start, region, vec![new_region])?;
+                true
+            }
+        })
     }
 
     fn insert_region(&mut self,
@@ -512,10 +993,141 @@ where Item: 'static + Copy + Debug,
         }
     }
 
+    fn preserve_region(&mut self,
+                       update: &mut ModelUpdate,
+                       start: u64,
+                       region: &Region<Item>,
+                       include_as_changed: bool)
+        -> Result<bool, ModelError>
+    {
+        let new_position = start
+            + update.rows_added
+            - update.rows_removed;
+
+        self.insert_region(new_position, region.clone())?;
+
+        if include_as_changed {
+            update.rows_changed += region.length;
+        }
+
+        Ok(include_as_changed)
+    }
+
+    fn replace_region(&mut self,
+                      update: &mut ModelUpdate,
+                      start: u64,
+                      region: &Region<Item>,
+                      new_regions: Vec<Region<Item>>)
+        -> Result<(), ModelError>
+    {
+        use std::cmp::Ordering::*;
+
+        let new_length: u64 = new_regions
+            .iter()
+            .map(|region| region.length)
+            .sum();
+
+        let effect = match new_length.cmp(&region.length) {
+            Greater => ModelUpdate {
+                rows_added: new_length - region.length,
+                rows_removed: 0,
+                rows_changed: region.length
+            },
+            Less => ModelUpdate {
+                rows_added: 0,
+                rows_removed: region.length - new_length,
+                rows_changed: new_length
+            },
+            Equal => ModelUpdate {
+                rows_added: 0,
+                rows_removed: 0,
+                rows_changed: region.length
+            },
+        };
+
+        #[cfg(feature="debug-region-map")]
+        {
+            println!();
+            println!("Replacing: {:?}", region);
+            for new_region in new_regions.iter() {
+                println!("     with: {:?}", new_region);
+            }
+            println!("           {:?}", effect);
+        }
+
+        let mut position = start
+            + update.rows_added
+            - update.rows_removed;
+
+        for region in new_regions {
+            let length = region.length;
+            self.insert_region(position, region)?;
+            position += length;
+        }
+
+        *update += effect;
+
+        Ok(())
+    }
+
+    fn partial_overlap(&mut self,
+                       update: &mut ModelUpdate,
+                       start: u64,
+                       region: &Region<Item>,
+                       changed_regions: Vec<Region<Item>>,
+                       unchanged_regions: Vec<Region<Item>>)
+        -> Result<(), ModelError>
+    {
+        let changed_length: u64 = changed_regions
+            .iter()
+            .map(|region| region.length)
+            .sum();
+
+        let unchanged_length: u64 = unchanged_regions
+            .iter()
+            .map(|region| region.length)
+            .sum();
+
+        let total_length = changed_length + unchanged_length;
+
+        let effect = ModelUpdate {
+            rows_added: total_length - region.length,
+            rows_removed: 0,
+            rows_changed: region.length - unchanged_length,
+        };
+
+        #[cfg(feature="debug-region-map")]
+        {
+            println!();
+            println!("Splitting: {:?}", region);
+            for changed_region in changed_regions.iter() {
+                println!("         : {:?}", changed_region);
+            }
+            for unchanged_region in unchanged_regions.iter() {
+                println!("         : {:?}", unchanged_region);
+            }
+            println!("           {:?}", effect);
+        }
+
+        let mut position = start + update.rows_added - update.rows_removed;
+        for region in changed_regions
+            .into_iter()
+            .chain(unchanged_regions)
+        {
+            let length = region.length;
+            self.insert_region(position, region)?;
+            position += length;
+        }
+
+        *update += effect;
+
+        Ok(())
+    }
+
     fn split_parent(&mut self,
                     parent_start: u64,
                     parent: &Region<Item>,
-                    _node_ref: &ItemNodeRc<Item>,
+                    node_ref: &ItemNodeRc<Item>,
                     parts_before: Vec<Region<Item>>,
                     new_region: Region<Item>,
                     parts_after: Vec<Region<Item>>)
@@ -536,7 +1148,7 @@ where Item: 'static + Copy + Debug,
         let rows_added = total_length - parent.length;
         let rows_changed = parent.length - length_before - length_after;
 
-        let update = ModelUpdate {
+        let mut update = ModelUpdate {
             rows_added,
             rows_removed: 0,
             rows_changed,
@@ -556,6 +1168,7 @@ where Item: 'static + Copy + Debug,
             println!("           {:?}", update);
         }
 
+        let interleaved = matches!(&new_region.source, InterleavedSearch(..));
         let new_position = parent_start + length_before;
         let position_after = new_position + new_region.length;
 
@@ -574,23 +1187,22 @@ where Item: 'static + Copy + Debug,
             .filter(|region| region.length > 0)
         {
             let length = region.length;
-            self.insert_region(position, region)?;
+            if interleaved {
+                self.overlap_region(
+                    &mut update,
+                    position - rows_added,
+                    &region,
+                    node_ref)?;
+            } else {
+                self.insert_region(position, region)?;
+            }
             position += length;
         }
 
         Ok(update)
     }
 
-    fn merge_regions(&mut self) {
-        #[cfg(feature="debug-region-map")]
-        {
-            println!();
-            println!("Before merge:");
-            for (start, region) in self.regions.iter() {
-                println!("{}: {:?}", start, region);
-            }
-        }
-
+    fn merge_pairs(&mut self) {
         self.regions = self.regions
             .split_off(&0)
             .into_iter()
@@ -610,6 +1222,54 @@ where Item: 'static + Copy + Debug,
                 }
             )
             .collect();
+    }
+
+    fn merge_regions(&mut self) {
+        #[cfg(feature="debug-region-map")]
+        {
+            println!();
+            println!("Before merge:");
+            for (start, region) in self.regions.iter() {
+                println!("{}: {:?}", start, region);
+            }
+        }
+
+        // Merge adjacent regions with the same source.
+        self.merge_pairs();
+
+        // Find starts and lengths of superfluous root regions.
+        let superfluous_regions: Vec<(u64, u64)> = self.regions
+            .iter()
+            .tuple_windows()
+            .filter_map(|((_, a), (b_start, b), (_, c))|
+                 match (&a.source, &b.source, &c.source) {
+                    (InterleavedSearch(exp_a, _),
+                     TopLevelItems(),
+                     InterleavedSearch(exp_c, _))
+                        if same_expanded(exp_a, exp_c) => {
+                            #[cfg(feature="debug-region-map")]
+                            {
+                                println!();
+                                println!("Dropping: {:?}", b);
+                            }
+                            Some((*b_start, b.length))
+                        },
+                    _ => None
+                 })
+            .collect();
+
+        // Remove superfluous regions.
+        for (start, length) in superfluous_regions {
+            self.regions.remove(&start);
+            let (_, next_region) = self.regions
+                .range_mut(start..)
+                .next()
+                .unwrap();
+            next_region.length += length;
+        }
+
+        // Once again merge adjacent regions with the same source.
+        self.merge_pairs();
     }
 
     pub fn update(&mut self) -> Result<Option<(u64, ModelUpdate)>, ModelError> {
@@ -649,7 +1309,7 @@ where Item: 'static + Copy + Debug,
                     }
                 )?;
             },
-            Some((_start, region)) => match region.source {
+            Some((_start, region)) => match &mut region.source {
                 TopLevelItems() =>
                     // Last region is top level items, extend it.
                     region.length += update.rows_added,
@@ -664,6 +1324,12 @@ where Item: 'static + Copy + Debug,
                             length: update.rows_added,
                         }
                     )?
+                },
+                InterleavedSearch(_expanded, range) => {
+                    // Last region is an interleaved search, extend it to
+                    // include the new top level items.
+                    range.end += update.rows_added;
+                    region.length += update.rows_added;
                 }
             }
         };
@@ -697,6 +1363,33 @@ where Item: 'static + Copy + Debug,
                 let parent_rc: AnyNodeRc<Item> = parent_rc.clone();
                 self.node(cap, &parent_rc, index, item)?
             },
+            // Region requiring interleaved search.
+            InterleavedSearch(expanded_rcs, range) => {
+                // Run the interleaved search.
+                let mut expanded = self.adapt_expanded(expanded_rcs);
+                let search_result =
+                    cap.find_child(&mut expanded, range, index)?;
+
+                // Return a node corresponding to the search result.
+                use SearchResult::*;
+                match search_result {
+                    // Search found a top level item.
+                    TopLevelItem(index, item) => {
+                        let root_rc: AnyNodeRc<Item> = self.root.clone();
+                        self.node(cap, &root_rc, index, item)?
+                    },
+                    // Search found a child of an expanded top level item.
+                    NextLevelItem(_, parent_index, child_index, item) => {
+                        // There must already be a node for its parent.
+                        let parent_rc: AnyNodeRc<Item> = self.root
+                            .borrow()
+                            .children()
+                            .get_expanded(parent_index)
+                            .ok_or(ParentDropped)?;
+                        self.node(cap, &parent_rc, child_index, item)?
+                    }
+                }
+            }
         })
     }
 }
