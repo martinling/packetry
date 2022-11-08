@@ -9,6 +9,7 @@ mod expander;
 mod tree_list_model;
 
 use std::cell::RefCell;
+use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
 use gtk::gio::ListModel;
@@ -46,16 +47,30 @@ mod hybrid_index;
 mod usb;
 mod vec_map;
 
+#[cfg(feature="record-ui-test")]
+mod record_ui;
+
+#[cfg(feature="record-ui-test")]
+use {
+    std::rc::Rc,
+    std::fs::File,
+    std::path::Path,
+    record_ui::{UIAction, create_logfile, log_action},
+};
+
 thread_local!(
     static MODELS: RefCell<Vec<Object>>  = RefCell::new(Vec::new());
     static LUNA: RefCell<Option<backend::luna::LunaCapture>> = RefCell::new(None);
     static WINDOW: RefCell<Option<ApplicationWindow>> = RefCell::new(None);
 );
 
-fn create_view<Item: 'static, Model, RowData>(capture: &Arc<Mutex<Capture>>)
-        -> ListView
+fn create_view<Item: 'static, Model, RowData>(
+    capture: &Arc<Mutex<Capture>>,
+    #[cfg(feature="record-ui-test")]
+    logfile: Rc<RefCell<File>>
+) -> ListView
     where
-        Item: Copy,
+        Item: Copy + Debug,
         Model: GenericModel<Item> + IsA<ListModel> + IsA<Object>,
         RowData: GenericRowData<Item> + IsA<Object>,
         Capture: ItemSource<Item>
@@ -64,6 +79,13 @@ fn create_view<Item: 'static, Model, RowData>(capture: &Arc<Mutex<Capture>>)
                       .expect("Failed to create model");
 
     MODELS.with(|models| models.borrow_mut().push(model.clone().upcast()));
+
+    #[cfg(feature="record-ui-test")]
+    log_action::<Model, RowData, Item>(
+        &model,
+        &logfile,
+        UIAction::Startup());
+
     let cap_arc = capture.clone();
     let selection_model = SingleSelection::new(Some(&model));
     let factory = SignalListItemFactory::new();
@@ -99,12 +121,19 @@ fn create_view<Item: 'static, Model, RowData>(capture: &Arc<Mutex<Capture>>)
                 let model = model.clone();
                 let node_ref = node_ref.clone();
                 let list_item = list_item.clone();
+                #[cfg(feature="record-ui-test")]
+                let logfile = logfile.clone();
                 let handler = expander.connect_expanded_notify(move |expander| {
                     let position = list_item.position();
                     let expanded = expander.is_expanded();
                     display_error(
                         model.set_expanded(&node_ref, position, expanded)
-                            .map_err(PacketryError::Model))
+                            .map_err(PacketryError::Model));
+                    #[cfg(feature="record-ui-test")]
+                    log_action::<Model, RowData, Item>(
+                        &model,
+                        &logfile,
+                        UIAction::SetExpanded(position, expanded));
                 });
                 expander_wrapper.set_handler(handler);
             },
@@ -162,6 +191,21 @@ fn activate(application: &Application) -> Result<(), PacketryError> {
     WINDOW.with(|win_opt| win_opt.replace(Some(window.clone())));
 
     let args: Vec<_> = std::env::args().collect();
+
+    #[cfg(feature="record-ui-test")]
+    let test_dir = {
+        let file_path = Path::new(&args[1]);
+        let dir = Path::new("./tests/ui/")
+                .join(file_path
+                    .file_stem()
+                    .expect("No file name"));
+        std::fs::create_dir_all(&dir)
+            .expect("Failed to create test directory");
+        std::fs::copy(file_path, dir.join(Path::new("capture.pcap")))
+            .expect("Failed to copy capture file");
+        dir
+    };
+
     let mut cap = Capture::new()?;
     let mut decoder = Decoder::new(&mut cap)?;
     let capture = Arc::new(Mutex::new(cap));
@@ -227,7 +271,10 @@ fn activate(application: &Application) -> Result<(), PacketryError> {
 
     let listview = create_view::<capture::TrafficItem,
                                  model::TrafficModel,
-                                 row_data::TrafficRowData>(&app_capture);
+                                 row_data::TrafficRowData>(
+                                     &app_capture,
+                                     #[cfg(feature="record-ui-test")]
+                                     create_logfile(&test_dir, "traffic"));
 
     let scrolled_window = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Automatic)
@@ -239,7 +286,11 @@ fn activate(application: &Application) -> Result<(), PacketryError> {
 
     let device_tree = create_view::<capture::DeviceItem,
                                     model::DeviceModel,
-                                    row_data::DeviceRowData>(&app_capture);
+                                    row_data::DeviceRowData>(
+                                        &app_capture,
+                                        #[cfg(feature="record-ui-test")]
+                                        create_logfile(&test_dir, "devices"));
+
     let device_window = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Automatic)
         .min_content_height(480)
