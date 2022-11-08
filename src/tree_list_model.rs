@@ -225,10 +225,19 @@ impl<Item> Region<Item> where Item: Clone {
     }
 }
 
+#[derive(Default)]
 pub struct ModelUpdate {
     pub rows_added: u64,
     pub rows_removed: u64,
     pub rows_changed: u64,
+}
+
+impl core::ops::AddAssign for ModelUpdate {
+    fn add_assign(&mut self, other: ModelUpdate) {
+        self.rows_added += other.rows_added;
+        self.rows_removed += other.rows_removed;
+        self.rows_changed += other.rows_changed;
+    }
 }
 
 impl Debug for ModelUpdate {
