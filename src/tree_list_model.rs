@@ -9,7 +9,7 @@ use std::ops::DerefMut;
 use itertools::Itertools;
 use thiserror::Error;
 
-use crate::capture::{Capture, CaptureError, ItemSource};
+use crate::capture::{Capture, CaptureError, ItemSource, CompletionStatus};
 
 #[derive(Error, Debug)]
 pub enum ModelError {
@@ -79,6 +79,9 @@ pub struct ItemNode<Item> {
 
     /// Index of this node below the parent Item.
     item_index: u64,
+
+    /// Completion status of this item.
+    completion: CompletionStatus,
 
     /// Children of this item.
     children: Children<Item>,
@@ -259,6 +262,7 @@ pub struct TreeListModel<Item> {
     capture: Arc<Mutex<Capture>>,
     regions: BTreeMap<u64, Region<Item>>,
     root: Rc<RefCell<RootNode<Item>>>,
+    incomplete: Vec<Weak<RefCell<ItemNode<Item>>>>,
 }
 
 impl<Item> TreeListModel<Item>
@@ -274,6 +278,7 @@ where Item: 'static + Copy + Debug,
             root: Rc::new(RefCell::new(RootNode {
                 children: Children::new(item_count),
             })),
+            incomplete: Vec::new(),
         };
         model.regions.insert(0, Region {
             source: Source::TopLevelItems(),
@@ -370,6 +375,7 @@ where Item: 'static + Copy + Debug,
                     item,
                     parent: Rc::downgrade(parent_rc),
                     item_index: index,
+                    completion: cap.item_end(&item, index)?,
                     children: Children::new(cap.item_count(&Some(item))?),
                 }))
             }
@@ -433,6 +439,14 @@ where Item: 'static + Copy + Debug,
 
         // Update total row counts back to the root.
         self.update_totals(node_ref, &update)?;
+
+        // If this item is not yet complete, add it to our incomplete list.
+        if matches!(
+            node_ref.borrow().completion,
+            CompletionStatus::StandaloneOngoing())
+        {
+            self.incomplete.push(Rc::downgrade(node_ref))
+        }
 
         Ok(update)
     }
@@ -627,7 +641,92 @@ where Item: 'static + Copy + Debug,
             .collect();
     }
 
-    pub fn update(&mut self) -> Result<Option<(u64, ModelUpdate)>, ModelError> {
+    pub fn update(&mut self) -> Result<Vec<(u64, ModelUpdate)>, ModelError> {
+
+        // List of positions and model updates to be returned.
+        let mut updates: Vec<(u64, ModelUpdate)> = Vec::new();
+
+        // Iterate over incomplete items, extending their regions as needed.
+        // Weak references that are no longer valid are dropped, since the
+        // referenced nodes must no longer be expanded.
+        for weak_rc in self.incomplete.split_off(0) {
+            if let Some(node_rc) = weak_rc.upgrade() {
+                use {CompletionStatus::*, Source::*};
+                let mut node = node_rc.borrow_mut();
+                let mut cap = self.capture.lock()
+                    .or(Err(ModelError::LockError))?;
+
+                // Count children before update, after update, and added.
+                let old_child_count = node.children.direct_count;
+                let new_child_count = cap.item_count(&Some(node.item))?;
+                let update = ModelUpdate {
+                    rows_added: new_child_count - old_child_count,
+                    rows_removed: 0,
+                    rows_changed: 0,
+                };
+
+                // Update child count and completion status.
+                node.children.direct_count = new_child_count;
+                node.completion = cap.item_end(&node.item, node.item_index)?;
+
+                drop(cap);
+
+                if matches!(node.completion, StandaloneOngoing()) {
+                    // This node is still incomplete, keep it in the list.
+                    self.incomplete.push(weak_rc);
+                }
+
+                // Find the start of this item's rows.
+                let start = self.regions
+                    .iter()
+                    .find_map(|(start, region)| {
+                        if let ChildrenOf(rc) = &region.source {
+                            if Rc::ptr_eq(rc, &node_rc) {
+                                return Some(start)
+                            }
+                        };
+                        None
+                    })
+                    .unwrap();
+
+                // Find the end of this item's rows.
+                let end = start + node.children.total_count;
+
+                // Check if the former last child of this item is expanded.
+                let last_expanded =
+                    old_child_count > 0 &&
+                    node.children.expanded(old_child_count - 1);
+
+                drop(node);
+
+                // If so, add a new region after all this node's rows.
+                if last_expanded {
+                    self.insert_region(
+                        end,
+                        Region {
+                            source: ChildrenOf(node_rc.clone()),
+                            offset: old_child_count,
+                            length: update.rows_added,
+                        })?;
+                // Otherwise, extend the last region in this node's rows.
+                } else {
+                    let (_start, region) = self.regions
+                        .range_mut(..end)
+                        .next_back()
+                        .unwrap();
+                    region.length += update.rows_added;
+                }
+
+                // Update total row counts back to the root.
+                self.update_totals(&node_rc, &update)?;
+
+                // Add this update to the list of updates to be applied.
+                updates.push((end, update));
+            }
+        }
+
+        // Handle new top-level items that were added.
+
         let mut cap = self.capture.lock().or(Err(ModelError::LockError))?;
 
         let mut root = self.root.borrow_mut();
@@ -637,7 +736,7 @@ where Item: 'static + Copy + Debug,
         drop(cap);
 
         if new_item_count == old_item_count {
-            return Ok(None);
+            return Ok(updates);
         }
 
         let position = root.children.total_count;
@@ -684,7 +783,10 @@ where Item: 'static + Copy + Debug,
             }
         };
 
-        Ok(Some((position, update)))
+        // Add the update for the new top level items to the list.
+        updates.push((position, update));
+
+        Ok(updates)
     }
 
     pub fn fetch(&self, position: u64)
