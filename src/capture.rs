@@ -660,21 +660,25 @@ impl Capture {
     }
 }
 
+pub enum CompletionStatus {
+    StandaloneComplete(),
+    StandaloneOngoing(),
+    InterleavedComplete(u64),
+    InterleavedOngoing(),
+}
+
 pub trait ItemSource<Item> {
-    type ItemId;
     fn item(&mut self, parent: &Option<Item>, index: u64) -> Result<Item, CaptureError>;
     fn child_item(&mut self, parent: &Item, index: u64) -> Result<Item, CaptureError>;
     fn item_count(&mut self, parent: &Option<Item>) -> Result<u64, CaptureError>;
     fn child_count(&mut self, parent: &Item) -> Result<u64, CaptureError>;
-    fn item_end(&mut self, item_id: Self::ItemId)
-        -> Result<Option<Self::ItemId>, CaptureError>;
+    fn item_end(&mut self, item: &Item, index: u64)
+        -> Result<CompletionStatus, CaptureError>;
     fn summary(&mut self, item: &Item) -> Result<String, CaptureError>;
     fn connectors(&mut self, item: &Item) -> Result<String, CaptureError>;
 }
 
 impl ItemSource<TrafficItem> for Capture {
-    type ItemId = TrafficItemId;
-
     fn item(&mut self, parent: &Option<TrafficItem>, index: u64)
         -> Result<TrafficItem, CaptureError>
     {
@@ -740,22 +744,35 @@ impl ItemSource<TrafficItem> for Capture {
         })
     }
 
-    fn item_end(&mut self, item_id: TrafficItemId)
-        -> Result<Option<TrafficItemId>, CaptureError>
+    fn item_end(&mut self, item: &TrafficItem, index: u64)
+        -> Result<CompletionStatus, CaptureError>
     {
-        let transfer_id = self.item_index.get(item_id)?;
-        let entry = self.transfer_index.get(transfer_id)?;
-        let ep_transfer_id = entry.transfer_id();
-        if !entry.is_start() {
-            return Err(IndexError(
-                String::from("Transfer entry for item_end is an end")))
-        }
-        let ep_traf = self.endpoint_traffic(entry.endpoint_id())?;
-        if ep_transfer_id.value >= ep_traf.end_index.len() {
-            return Ok(None)
-        }
-        let end_item_id = ep_traf.end_index.get(ep_transfer_id)?;
-        Ok(Some(end_item_id))
+        use TrafficItem::*;
+        use CompletionStatus::*;
+        Ok(match item {
+            Transfer(transfer_id) => {
+                let entry = self.transfer_index.get(*transfer_id)?;
+                let ep_transfer_id = entry.transfer_id();
+                if !entry.is_start() {
+                    return Ok(InterleavedComplete(index))
+                }
+                let ep_traf = self.endpoint_traffic(entry.endpoint_id())?;
+                if ep_transfer_id.value >= ep_traf.end_index.len() {
+                    InterleavedOngoing()
+                } else {
+                    let end_item_id = ep_traf.end_index.get(ep_transfer_id)?;
+                    InterleavedComplete(end_item_id.value)
+                }
+            },
+            Transaction(_, transaction_id) => {
+                if transaction_id.value >= self.transaction_index.len() {
+                    StandaloneOngoing()
+                } else {
+                    StandaloneComplete()
+                }
+            },
+            Packet(..) => StandaloneComplete()
+        })
     }
 
     fn summary(&mut self, item: &TrafficItem)
@@ -979,8 +996,6 @@ impl ItemSource<TrafficItem> for Capture {
 }
 
 impl ItemSource<DeviceItem> for Capture {
-    type ItemId = DeviceId;
-
     fn item(&mut self, parent: &Option<DeviceItem>, index: u64)
         -> Result<DeviceItem, CaptureError>
     {
@@ -1070,10 +1085,10 @@ impl ItemSource<DeviceItem> for Capture {
         }) as u64)
     }
 
-    fn item_end(&mut self, _item_id: DeviceId)
-        -> Result<Option<DeviceId>, CaptureError>
+    fn item_end(&mut self, _item: &DeviceItem, _index: u64)
+        -> Result<CompletionStatus, CaptureError>
     {
-        Ok(None)
+        Ok(CompletionStatus::StandaloneComplete())
     }
 
     fn summary(&mut self, item: &DeviceItem)
