@@ -1551,7 +1551,7 @@ mod tests {
 
     #[test]
     fn test_captures() {
-        let test_dir = "./tests/";
+        let test_dir = "./tests/decoder/";
         for result in std::fs::read_dir(test_dir).unwrap() {
             let entry = result.unwrap();
             if entry.file_type().unwrap().is_dir() {
