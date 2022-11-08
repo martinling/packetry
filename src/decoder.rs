@@ -76,8 +76,8 @@ impl TransactionState {
         use DecodeStatus::*;
         Ok(match (self.first, self.last, next) {
 
-            // SETUP, IN or OUT always start a new transaction.
-            (_, _, SETUP | IN | OUT) => New,
+            // SETUP, IN, OUT and PING always start a new transaction.
+            (_, _, SETUP | IN | OUT | PING) => New,
 
             // SOF when there is no existing transaction starts a new
             // "transaction" representing an idle period on the bus.
@@ -123,6 +123,9 @@ impl TransactionState {
             // OUT may also be completed by NAK or STALL.
             (Some(OUT), Some(DATA0 | DATA1), NAK | STALL) => Done,
 
+            // PING may be followed by ACK or NAK.
+            (Some(PING), Some(PING), ACK | NAK) => Done,
+
             // Any other case is not a valid part of a transaction.
             _ => Invalid,
         })
@@ -131,10 +134,12 @@ impl TransactionState {
     fn completed(&self) -> bool {
         use PID::*;
         // A transaction is completed if it has 3 valid packets and is
-        // acknowledged with an ACK or NYET handshake.
-        match (self.count, self.last) {
-            (3, Some(ACK | NYET)) => true,
-            (..)                  => false
+        // acknowledged with an ACK or NYET handshake, except for PING
+        // transactions which complete after 2 with an ACK or NAK.
+        match (self.first, self.count, self.last) {
+            (Some(PING), 2, Some(ACK | NAK) ) => true,
+            (_         , 3, Some(ACK | NYET)) => true,
+            (..)                              => false
         }
     }
 }
@@ -218,9 +223,10 @@ impl Decoder {
         let dev_addr = token.device_address();
         let ep_num = token.endpoint_number();
         let direction = match (ep_num.0, pid) {
-            (0, _)        => Direction::Out,
-            (_, PID::IN)  => Direction::In,
-            (_, PID::OUT) => Direction::Out,
+            (0, _)         => Direction::Out,
+            (_, PID::IN)   => Direction::In,
+            (_, PID::OUT)  => Direction::Out,
+            (_, PID::PING) => Direction::Out,
             _ => return Err(IndexError(format!(
                 "PID {} does not indicate a direction", pid)))
         };
@@ -533,6 +539,13 @@ impl Decoder {
                                 Retry
                             }
                         },
+
+                        // PING is valid at any time that OUT would be.
+                        (Out, true,  Some(SETUP), PING) |
+                        (Out, true,  Some(OUT),   PING) |
+                        (In,  false, Some(SETUP), PING) |
+                        (In,  true,  Some(IN),    PING) => Retry,
+
                         // Any other sequence is invalid.
                         (..) => Invalid
                     }
@@ -593,6 +606,9 @@ impl Decoder {
                     Retry
                 }
             },
+
+            // OUT may be followed by PING.
+            (_, Some(OUT), PING) => Retry,
 
             // A SOF group starts a special transfer, unless
             // one is already in progress.
