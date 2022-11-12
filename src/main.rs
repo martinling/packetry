@@ -9,6 +9,7 @@ mod expander;
 mod tree_list_model;
 
 use std::cell::RefCell;
+use std::fs::File;
 use std::sync::{Arc, Mutex};
 
 use gtk::gio::ListModel;
@@ -27,6 +28,8 @@ use gtk::{
     SingleSelection,
     Orientation,
 };
+
+use pcap_file::{PcapError, pcap::PcapReader};
 
 use model::{GenericModel, TrafficModel};
 use row_data::GenericRowData;
@@ -138,7 +141,9 @@ pub enum PacketryError {
     #[error("tree model error: {0}")]
     Model(#[from] ModelError),
     #[error("pcap error: {0}")]
-    Pcap(#[from] pcap::Error),
+    Io(#[from] std::io::Error),
+    #[error("I/O error: {0}")]
+    Pcap(#[from] PcapError),
     #[error("LUNA error: {0}")]
     Luna(#[from] luna::Error),
     #[error("locking failed")]
@@ -165,9 +170,11 @@ fn activate(application: &Application) -> Result<(), PacketryError> {
     let app_capture = capture.clone();
 
     if args.len() > 1 {
-        let mut pcap = pcap::Capture::from_file(&args[1])?;
+        let pcap_file = File::open(&args[1])?;
+        let pcap_reader = PcapReader::new(pcap_file)?;
         let mut cap = capture.lock().or(Err(PacketryError::Lock))?;
-        while let Ok(packet) = pcap.next() {
+        for result in pcap_reader {
+            let packet = result?.data;
             decoder.handle_raw_packet(&mut cap, &packet)?;
         }
         cap.print_storage_summary();
