@@ -1447,11 +1447,37 @@ where Item: 'static + Copy + Debug,
                         }
                     )?
                 },
-                InterleavedSearch(_expanded, range) => {
-                    // Last region is an interleaved search, extend it to
-                    // include the new top level items.
-                    range.end += update.rows_added;
-                    region.length += update.rows_added;
+                InterleavedSearch(expanded, _range) => {
+                    // Last region is an interleaved search. Some of the
+                    // expanded items in it may have now ended. Update it,
+                    // perhaps breaking it into multiple regions.
+
+                    // The items expanded in this region that have completed.
+                    let mut completed: BTreeMap<u64, ItemNodeRc<Item>> =
+                        BTreeMap::new();
+
+                    let mut cap = self.capture.lock()
+                        .or(Err(ModelError::LockError))?;
+
+                    for node_rc in expanded {
+                        let mut node = node_rc.borrow_mut();
+                        // Update completion status for this node.
+                        node.completion =
+                            cap.item_end(&node.item, node.item_index)?;
+
+                        // If this item completed, make a note of it.
+                        use CompletionStatus::*;
+                        if let InterleavedComplete(end) = node.completion {
+                            completed.insert(end, node_rc.clone());
+                        }
+                    }
+
+                    drop(cap);
+
+                    // Now split the region for each item that completed.
+                    for (_end, _node_rc) in completed {
+                        unimplemented!();
+                    }
                 }
             }
         };
