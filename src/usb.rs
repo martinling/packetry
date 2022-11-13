@@ -150,6 +150,14 @@ impl std::fmt::Display for BCDVersion {
     }
 }
 
+#[derive(Copy, Clone, Debug, FromPrimitive)]
+#[repr(u8)]
+pub enum StartComplete {
+    #[default]
+    Start = 0,
+    Complete = 1,
+}
+
 bitfield! {
     #[derive(Debug)]
     pub struct SOFFields(u16);
@@ -170,12 +178,33 @@ pub struct DataFields {
     pub crc: u16,
 }
 
+bitfield! {
+    #[derive(Debug)]
+    pub struct SplitFields(u32);
+    pub u8, into DeviceAddr, hub_address, _: 6, 0;
+    pub u8, into StartComplete, sc, _: 7, 7;
+    pub u8, port, _: 14, 8;
+    pub bool, start, _: 15;
+    pub bool, end, _: 16;
+    pub u8, into EndpointType, endpoint_type, _: 18, 17;
+    pub u8, crc, _: 23, 19;
+}
+
+impl SplitFields {
+    pub fn from_packet(packet: &[u8]) -> SplitFields {
+        SplitFields(
+            u32::from_le_bytes(
+                [packet[1], packet[2], packet[3], 0]))
+    }
+}
+
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Debug)]
 pub enum PacketFields {
     SOF(SOFFields),
     Token(TokenFields),
     Data(DataFields),
+    Split(SplitFields),
     None
 }
 
@@ -194,6 +223,7 @@ impl PacketFields {
                 DataFields{
                     crc: u16::from_le_bytes(
                         [packet[end - 2], packet[end - 1]])}),
+            SPLIT => PacketFields::Split(SplitFields::from_packet(packet)),
             _ => PacketFields::None
         }
     }
@@ -840,6 +870,8 @@ pub mod prelude {
         PacketFields,
         TokenFields,
         SetupFields,
+        SplitFields,
+        StartComplete,
         Direction,
         EndpointAddr,
         StandardRequest,

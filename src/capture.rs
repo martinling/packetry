@@ -251,9 +251,18 @@ impl Transaction {
 
     fn successful(&self) -> bool {
         use PID::*;
-        match (self.packet_count(), self.end_pid) {
-            (3, ACK | NYET) => true,
-            (..)            => false
+        match (self.start_pid, self.end_pid) {
+
+            // SPLIT is successful if it ends with DATA0/DATA1/ACK/NYET.
+            (SPLIT, DATA0 | DATA1 | ACK | NYET) => true,
+
+            // PING is successful if it ends with ACK.
+            (PING, ACK) => true,
+
+            // SETUP/IN/OUT is successful if it ends with ACK/NYET.
+            (SETUP | IN | OUT, ACK | NYET) => true,
+
+            (..) => false
         }
     }
 }
@@ -593,14 +602,35 @@ impl Capture {
                                   .get_range(&range)?;
         let mut transactions = self.completed_transactions(transaction_ids);
         let fields = match transactions.next(self) {
-            Some(transaction) if transaction.start_pid == PID::SETUP => {
-                let data_packet_id = transaction.packet_id_range.start + 1;
+            Some(transaction) => {
+                use PID::*;
+                let offset = match transaction.start_pid {
+                    SPLIT => 2,
+                    SETUP => 1,
+                    _ => return Err(IndexError(String::from(
+                        "Could not find setup data for control transfer")))
+                };
+                let data_packet_id = transaction.packet_id_range.start + offset;
                 let data_packet = self.packet(data_packet_id)?;
-                SetupFields::from_data_packet(&data_packet)
+                let data_pid = PID::from(
+                    *data_packet.first().ok_or_else(||
+                        IndexError(String::from(
+                            "Found empty packet instead of setup data")))?);
+                if data_pid != DATA0 {
+                    return Err(IndexError(format!(
+                        "Found {} packet instead of setup data",
+                        data_pid)));
+                } else if data_packet.len() != 11 {
+                    return Err(IndexError(format!(
+                        "Found DATA0 with packet length {} instead of setup data",
+                        data_packet.len())));
+                } else {
+                    SetupFields::from_data_packet(&data_packet)
+                }
             },
             _ => {
                 return Err(IndexError(String::from(
-                    "Control transfer did not start with SETUP packet")))
+                    "Control transfer has no completed transactions")))
             }
         };
         let direction = fields.type_fields.direction();
@@ -1095,6 +1125,7 @@ impl ItemSource<TrafficItem> for Capture {
         -> Result<String, CaptureError>
     {
         use TrafficItem::*;
+        use usb::StartComplete::*;
         Ok(match item {
             Packet(.., packet_id) => {
                 let packet = self.packet(*packet_id)?;
@@ -1123,6 +1154,15 @@ impl ItemSource<TrafficItem> for Capture {
                             data.crc,
                             packet.len() - 3,
                             Bytes::first(100, &packet[1 .. packet.len() - 2])),
+                        PacketFields::Split(split) => format!(
+                            " {} {} transaction on hub {} port {}",
+                            match split.sc() {
+                                Start => "starting",
+                                Complete => "completing",
+                            },
+                            format!("{:?}", split.endpoint_type()).to_lowercase(),
+                            split.hub_address(),
+                            split.port()),
                         PacketFields::None => match pid {
                             PID::Malformed => format!(": {:02X?}", packet),
                             _ => "".to_string()

@@ -46,6 +46,8 @@ struct TransactionState {
     first: Option<PID>,
     last: Option<PID>,
     start: Option<PacketId>,
+    split_sc: Option<StartComplete>,
+    split_pid: Option<PID>,
     count: u64,
     endpoint_id: Option<EndpointId>,
     setup: Option<SetupFields>,
@@ -61,7 +63,56 @@ impl TransactionState {
         use DecodeStatus::*;
         Ok(match (self.first, self.last, next) {
 
-            // SETUP, IN, OUT and PING always start a new transaction.
+            // SPLIT starts a new transaction.
+            (_, _, SPLIT) => New,
+
+            // SPLIT must be handled according to start/complete flag.
+            (Some(SPLIT), Some(last), _) => {
+                let sc = self.split_sc
+                    .ok_or_else(|| IndexError(String::from(
+                        "SPLIT start/complete flag not set")))?;
+
+                use StartComplete::*;
+                match (sc, last, next) {
+
+                    // SPLIT must always be followed by SETUP, IN or OUT.
+                    (_, SPLIT, SETUP | IN | OUT) => Continue,
+
+                    // After SSPLIT and SETUP, DATA0 must follow.
+                    (Start, SETUP, DATA0) => {
+                        match packet.len() {
+                            11 => {
+                                self.setup = Some(
+                                    SetupFields::from_data_packet(packet));
+                                // Wait for ACK.
+                                Continue
+                            },
+                            _ => Invalid
+                        }
+                    },
+
+                    // After SSPLIT and IN, ACK or NAK end transaction.
+                    (Start, IN, ACK | NAK) => Done,
+
+                    // After SSPLIT and OUT, DATA0 or DATA1 must follow.
+                    (Start, OUT, DATA0 | DATA1) => Continue,
+
+                    // ...then ACK or NAK end transaction.
+                    (Start, DATA0 | DATA1, ACK | NAK) => Done,
+
+                    // After CSPLIT and IN, DATA0/DATA1/NAK/STALL/NYET follow.
+                    (Complete, IN, DATA0 | DATA1 | NAK | STALL | NYET) => Done,
+
+                    // After CSPLIT and OUT/SETUP, NYET/STALL/ACK/NAK follow.
+                    (Complete, OUT | SETUP, NYET | STALL | ACK | NAK) => Done,
+
+                    // Any other combination is invalid.
+                    (..) => Invalid,
+                }
+            },
+
+            // Unless handled above after SPLIT, SETUP/IN/OUT/PING always
+            // start a new transaction.
             (_, _, SETUP | IN | OUT | PING) => New,
 
             // SOF when there is no existing transaction starts a new
@@ -116,15 +167,30 @@ impl TransactionState {
         })
     }
 
-    fn completed(&self) -> bool {
+    fn successful(&self) -> bool {
         use PID::*;
-        // A transaction is completed if it has 3 valid packets and is
-        // acknowledged with an ACK or NYET handshake, except for PING
-        // transactions which complete after 2 with an ACK or NAK.
-        match (self.first, self.count, self.last) {
-            (Some(PING), 2, Some(ACK | NAK) ) => true,
-            (_         , 3, Some(ACK | NYET)) => true,
-            (..)                              => false
+        use StartComplete::*;
+        match (self.first, self.last) {
+
+            // SPLIT success depends on start/complete flag.
+            (Some(SPLIT), Some(last)) => match (self.split_sc, last) {
+
+                // SSPLIT is successful if it ends with ACK/NYET.
+                (Some(Start), ACK | NYET) => true,
+
+                // CSPLIT is successful if it ends with DATA0/DATA1/ACK/NYET.
+                (Some(Complete), DATA0 | DATA1 | ACK | NYET) => true,
+
+                (..) => false,
+            },
+
+            // PING is successful if it ends with ACK.
+            (Some(PING), Some(ACK)) => true,
+
+            // SETUP/IN/OUT is successful if it ends with ACK/NYET.
+            (Some(SETUP | IN | OUT), Some(ACK | NYET)) => true,
+
+            (..) => false
         }
     }
 }
@@ -221,10 +287,21 @@ impl Decoder {
         })
     }
 
+    fn packet_endpoint(&mut self, capture: &mut Capture, packet: &[u8])
+        -> Result<EndpointId, CaptureError>
+    {
+        let pid = PID::from_packet(packet)?;
+        Ok(match PacketFields::from_packet(packet) {
+            PacketFields::SOF(_) => Decoder::FRAMING_EP_ID,
+            PacketFields::Token(token) =>
+                self.token_endpoint(capture, pid, &token)?,
+            _ => Decoder::INVALID_EP_ID,
+        })
+    }
+
     fn transaction_update(&mut self, capture: &mut Capture, packet_id: PacketId, packet: &[u8])
         -> Result<(), CaptureError>
     {
-        let pid = PID::from_packet(packet)?;
         use DecodeStatus::*;
         match self.transaction_state.status(packet)? {
             Single => {
@@ -235,10 +312,10 @@ impl Decoder {
                 self.transaction_start(capture, packet_id, packet)?;
             },
             Continue | Retry => {
-                self.transaction_append(pid);
+                self.transaction_append(capture, packet)?;
             },
             Done => {
-                self.transaction_append(pid);
+                self.transaction_append(capture, packet)?;
                 self.transaction_end(capture)?;
             },
             Invalid => {
@@ -260,21 +337,27 @@ impl Decoder {
         state.count = 1;
         state.first = Some(pid);
         state.last = state.first;
-        self.transaction_state.endpoint_id = Some(
-            match PacketFields::from_packet(packet) {
-                PacketFields::SOF(_) => Decoder::FRAMING_EP_ID,
-                PacketFields::Token(token) =>
-                    self.token_endpoint(capture, pid, &token)?,
-                _ => Decoder::INVALID_EP_ID,
-            }
-        );
+        self.transaction_state.endpoint_id =
+            Some(self.packet_endpoint(capture, packet)?);
+        if pid == PID::SPLIT {
+            let split = SplitFields::from_packet(packet);
+            self.transaction_state.split_sc = Some(split.sc());
+        };
         Ok(())
     }
 
-    fn transaction_append(&mut self, pid: PID) {
-        let state = &mut self.transaction_state;
-        state.count += 1;
-        state.last = Some(pid);
+    fn transaction_append(&mut self, capture: &mut Capture, packet: &[u8])
+        -> Result<(), CaptureError>
+    {
+        let pid = PID::from_packet(packet)?;
+        self.transaction_state.count += 1;
+        if self.transaction_state.last == Some(PID::SPLIT) {
+            self.transaction_state.endpoint_id =
+                Some(self.packet_endpoint(capture, packet)?);
+            self.transaction_state.split_pid = Some(pid);
+        }
+        self.transaction_state.last = Some(pid);
+        Ok(())
     }
 
     fn transaction_end(&mut self, capture: &mut Capture)
@@ -466,17 +549,14 @@ impl Decoder {
         Ok(())
     }
 
-    fn transfer_status(&mut self, capture: &mut Capture)
+    fn transfer_status(&mut self, capture: &mut Capture, next: PID)
         -> Result<DecodeStatus, CaptureError>
     {
-        let next = self.transaction_state.first.ok_or_else(||
-            IndexError(String::from(
-                "Transaction state has no first PID set")))?;
         let endpoint_id = self.current_endpoint_id()?;
         let ep_data = self.current_endpoint_data()?;
         let dev_data = self.current_device_data(capture)?;
         let (ep_type, ep_max) = dev_data.endpoint_details(ep_data.address);
-        let success = self.transaction_state.completed();
+        let success = self.transaction_state.successful();
         let length = self.transaction_state.payload.len() as u64;
         let short = match ep_max {
             Some(max) => length < max as u64,
@@ -492,9 +572,15 @@ impl Decoder {
             // A SETUP transaction starts a new control transfer.
             // Store the setup fields to interpret the request.
             (Normal(Control), _, SETUP) => {
-                let setup = self.transaction_state.setup.take();
-                let ep_data = self.current_endpoint_data_mut()?;
-                ep_data.setup = setup;
+                use StartComplete::*;
+                match self.transaction_state.split_sc {
+                    None | Some(Start) => {
+                        let setup = self.transaction_state.setup;
+                        let ep_data = self.current_endpoint_data_mut()?;
+                        ep_data.setup = setup;
+                    },
+                    Some(Complete) => {},
+                };
                 New
             },
 
@@ -633,26 +719,74 @@ impl Decoder {
         -> Result<(), CaptureError>
     {
         use DecodeStatus::*;
-        match self.transfer_status(capture)? {
-            Single => {
-                self.transfer_start(capture, transaction_id, true)?;
+        use StartComplete::*;
+        let mut next = self.transaction_state.first.ok_or_else(||
+            IndexError(String::from(
+                "Transaction state has no first PID set")))?;
+        if next == PID::SPLIT {
+            next = self.transaction_state.split_pid.ok_or_else(||
+                IndexError(String::from(
+                    "Transaction state has no split PID set")))?;
+        }
+        match (self.transfer_status(capture, next)?,
+               self.transaction_state.split_sc,
+               self.transaction_state.successful())
+        {
+            (Single, None, _) => {
+                self.transfer_start(capture, transaction_id, next, true)?;
                 self.transfer_end(capture)?;
             },
-            New => {
-                self.transfer_start(capture, transaction_id, true)?;
+            (Single, Some(Start), true) => {
+                self.transfer_start(capture, transaction_id, next, false)?;
             },
-            Continue => {
-                self.transfer_append(capture, transaction_id, true)?;
-            },
-            Retry => {
-                self.transfer_append(capture, transaction_id, false)?;
-            },
-            Done => {
-                self.transfer_append(capture, transaction_id, true)?;
+            (Single, Some(Start), false) => {
+                self.transfer_start(capture, transaction_id, next, false)?;
                 self.transfer_end(capture)?;
             },
-            Invalid => {
-                self.transfer_start(capture, transaction_id, false)?;
+            (Single, Some(Complete), true) => {
+                self.transfer_append(capture, transaction_id, next, true)?;
+            },
+            (Single, Some(Complete), false) => {
+                self.transfer_append(capture, transaction_id, next, false)?;
+                self.transfer_end(capture)?;
+            },
+            (New, None, _) => {
+                self.transfer_start(capture, transaction_id, next, true)?;
+            },
+            (New, Some(Start), true) => {
+                self.transfer_start(capture, transaction_id, next, false)?;
+            },
+            (New, Some(Start), false) => {
+                self.transfer_start(capture, transaction_id, next, false)?;
+                self.transfer_end(capture)?;
+            },
+            (New, Some(Complete), true) => {
+                self.transfer_append(capture, transaction_id, next, true)?;
+            },
+            (New, Some(Complete), false) => {
+                self.transfer_append(capture, transaction_id, next, true)?;
+                self.transfer_end(capture)?;
+            },
+            (Continue, None, _) |
+            (Continue, Some(Complete), true) => {
+                self.transfer_append(capture, transaction_id, next, true)?;
+            },
+            (Continue, ..) => {
+                self.transfer_append(capture, transaction_id, next, false)?;
+            },
+            (Retry, ..) => {
+                self.transfer_append(capture, transaction_id, next, false)?;
+            },
+            (Done, None, _) |
+            (Done, Some(Complete), true) => {
+                self.transfer_append(capture, transaction_id, next, true)?;
+                self.transfer_end(capture)?;
+            },
+            (Done, ..) => {
+                self.transfer_append(capture, transaction_id, next, false)?;
+            }
+            (Invalid, ..) => {
+                self.transfer_start(capture, transaction_id, next, false)?;
                 self.transfer_end(capture)?;
             }
         }
@@ -662,6 +796,7 @@ impl Decoder {
     fn transfer_start(&mut self,
                       capture: &mut Capture,
                       transaction_id: TransactionId,
+                      transaction_type: PID,
                       success: bool)
         -> Result<(), CaptureError>
     {
@@ -672,7 +807,6 @@ impl Decoder {
             let ep_data = self.current_endpoint_data_mut()?;
             ep_data.ended = ep_data.active.take();
         }
-        let transaction_type = self.transaction_state.first;
         let ep_traf = capture.endpoint_traffic(endpoint_id)?;
         let ep_transaction_id = ep_traf.transaction_ids.push(transaction_id)?;
         let ep_transfer_id = ep_traf.transfer_index.push(ep_transaction_id)?;
@@ -680,7 +814,7 @@ impl Decoder {
         ep_data.active = Some(ep_transfer_id);
         ep_data.transaction_count = 1;
         if success {
-            ep_data.last = transaction_type;
+            ep_data.last = Some(transaction_type);
         } else {
             ep_data.last = None
         }
@@ -693,17 +827,17 @@ impl Decoder {
     fn transfer_append(&mut self,
                        capture: &mut Capture,
                        transaction_id: TransactionId,
+                       transaction_type: PID,
                        success: bool)
         -> Result<(), CaptureError>
     {
-        let transaction_type = self.transaction_state.first;
         let endpoint_id = self.current_endpoint_id()?;
         let ep_traf = capture.endpoint_traffic(endpoint_id)?;
         ep_traf.transaction_ids.push(transaction_id)?;
         let ep_data = self.current_endpoint_data_mut()?;
         ep_data.transaction_count += 1;
         if success {
-            ep_data.last = transaction_type;
+            ep_data.last = Some(transaction_type);
         }
         Ok(())
     }
