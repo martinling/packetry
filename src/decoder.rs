@@ -171,7 +171,7 @@ pub struct Decoder {
 }
 
 impl Decoder {
-    pub fn new(capture: &mut Capture) -> Result<Self, CaptureError> {
+    pub fn new() -> Decoder {
         let mut decoder = Decoder {
             device_index: VecMap::new(),
             endpoint_index: VecMap::new(),
@@ -200,7 +200,7 @@ impl Decoder {
             let ep_state = EndpointState::Idle as u8;
             decoder.last_endpoint_state.push(ep_state);
         }
-        Ok(decoder)
+        decoder
     }
 
     const INVALID_EP_ID: EndpointId = EndpointId::constant(0);
