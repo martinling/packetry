@@ -172,6 +172,57 @@ impl<Item> ItemNode<Item> where Item: Copy {
     }
 }
 
+trait ItemNodeRcOps {
+    fn set_expanded(&self, expanded: bool) -> Result<ModelUpdate, ModelError>;
+    fn update_row_counts(&self, update: &ModelUpdate) -> Result<(), ModelError>;
+}
+
+impl<Item> ItemNodeRcOps for ItemNodeRc<Item>
+where Item: Copy + 'static
+{
+    fn set_expanded(&self, expanded: bool) -> Result<ModelUpdate, ModelError> {
+        // Retrieve information we need from the node.
+        let node = self.borrow();
+        let parent_rc = node.parent
+            .upgrade()
+            .ok_or(ModelError::ParentDropped)?;
+        let child_count = node.children.total_count;
+        drop(node);
+
+        // Add or remove this node from the parent's expanded children.
+        parent_rc
+            .borrow_mut()
+            .children_mut()
+            .set_expanded(self, expanded);
+
+        // Generate update.
+        let update = ModelUpdate {
+            rows_added: if expanded { child_count } else { 0 },
+            rows_removed: if expanded { 0 } else { child_count },
+            rows_changed: 0,
+        };
+
+        // Propagate change in total rows back to the root.
+        self.update_row_counts(&update)?;
+
+        Ok(update)
+    }
+
+    fn update_row_counts(&self, update: &ModelUpdate) -> Result<(), ModelError>
+    {
+        let mut current_node: AnyNodeRc<Item> = self.clone();
+        while let Some(parent_rc) = current_node.clone().borrow().parent()? {
+            let mut parent = parent_rc.borrow_mut();
+            let children = parent.children_mut();
+            children.total_count += update.rows_added;
+            children.total_count -= update.rows_removed;
+            drop(parent);
+            current_node = parent_rc;
+        }
+        Ok(())
+    }
+}
+
 pub struct ModelUpdate {
     pub rows_added: u64,
     pub rows_removed: u64,
@@ -208,38 +259,10 @@ where Item: 'static + Copy,
                         expanded: bool)
         -> Result<ModelUpdate, ModelError>
     {
-        let node = node_ref.borrow();
-        if node.expanded() == expanded {
+        if expanded == node_ref.borrow().expanded() {
             return Err(ModelError::AlreadyDone);
         }
-
-        node.parent
-            .upgrade()
-            .ok_or(ModelError::ParentDropped)?
-            .borrow_mut()
-            .children_mut()
-            .set_expanded(node_ref, expanded);
-
-        // Traverse back up the tree, modifying `children.total_count` for
-        // expanded/collapsed entries.
-        let mut current_node: AnyNodeRc<Item> = node_ref.clone();
-        while let Some(parent_ref) = current_node.clone().borrow().parent()? {
-            let mut parent = parent_ref.borrow_mut();
-            let children = parent.children_mut();
-            if expanded {
-                children.total_count += node.children.total_count;
-            } else {
-                children.total_count -= node.children.total_count;
-            }
-            drop(parent);
-            current_node = parent_ref;
-        }
-
-        Ok(ModelUpdate {
-            rows_added: if expanded { node.children.total_count } else { 0 },
-            rows_removed: if expanded { 0 } else { node.children.total_count },
-            rows_changed: 0,
-        })
+        node_ref.set_expanded(expanded)
     }
 
     pub fn update(&mut self) -> Result<Option<(u64, ModelUpdate)>, ModelError> {
