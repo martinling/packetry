@@ -348,7 +348,7 @@ where Item: 'static + Copy,
         let mut cap = self.capture.lock().or(Err(ModelError::LockError))?;
         let parent = parent_ref.borrow();
         let item = cap.item(&parent.item(), relative_position)?;
-        let child_count = cap.child_count(&item)?;
+        let (_completion, child_count) = cap.children(&item)?;
         let node = ItemNode {
             item,
             parent: Rc::downgrade(&parent_ref),
