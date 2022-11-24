@@ -32,7 +32,7 @@ use gtk::{
 
 use pcap_file::{PcapError, pcap::PcapReader};
 
-use model::{GenericModel, TrafficModel};
+use model::{GenericModel, TrafficModel, DeviceModel};
 use row_data::GenericRowData;
 use expander::ExpanderWrapper;
 use tree_list_model::ModelError;
@@ -101,10 +101,13 @@ fn create_view<Item: 'static, Model, RowData>(capture: &Arc<Mutex<Capture>>)
                 expander.set_expanded(node.expanded());
                 let model = model.clone();
                 let node_ref = node_ref.clone();
+                let list_item = list_item.clone();
                 let handler = expander.connect_expanded_notify(move |expander| {
+                    let position = list_item.position();
+                    let expanded = expander.is_expanded();
                     display_error(
-                        model.set_expanded(&node_ref, expander.is_expanded())
-                            .map_err(PacketryError::Model));
+                        model.set_expanded(&node_ref, position, expanded)
+                            .map_err(PacketryError::Model))
                 });
                 expander_wrapper.set_handler(handler);
             },
@@ -218,10 +221,18 @@ fn activate(application: &Application) -> Result<(), PacketryError> {
 
             MODELS.with::<_, Result<(), PacketryError>>(|models| {
                 for model in models.borrow().iter() {
-                    let model = model.clone();
-                    if let Ok(tree_model) = model.downcast::<TrafficModel>() {
+                    if let Ok(tree_model) = model
+                        .clone()
+                        .downcast::<TrafficModel>()
+                    {
                         tree_model.update()?;
-                    };
+                    }
+                    else if let Ok(tree_model) = model
+                        .clone()
+                        .downcast::<DeviceModel>()
+                    {
+                        tree_model.update()?;
+                    }
                 }
                 Ok(())
             })?;
