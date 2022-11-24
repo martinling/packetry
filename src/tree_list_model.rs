@@ -264,7 +264,7 @@ where Item: 'static + Copy,
 {
     pub fn new(capture: Arc<Mutex<Capture>>) -> Result<Self, ModelError> {
         let mut cap = capture.lock().or(Err(ModelError::LockError))?;
-        let item_count = cap.item_count(&None)?;
+        let item_count = cap.item_count()?;
         Ok(TreeListModel {
             capture: capture.clone(),
             root: Rc::new(RefCell::new(RootNode {
@@ -293,7 +293,7 @@ where Item: 'static + Copy,
         let mut cap = self.capture.lock().or(Err(ModelError::LockError))?;
 
         let mut root = self.root.borrow_mut();
-        let new_item_count = cap.item_count(&None)?;
+        let new_item_count = cap.item_count()?;
         let old_item_count = root.children.direct_count;
 
         if new_item_count == old_item_count {

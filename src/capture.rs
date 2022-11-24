@@ -713,7 +713,7 @@ pub trait ItemSource<Item> {
     type ItemId;
     fn item(&mut self, parent: &Option<Item>, index: u64) -> Result<Item, CaptureError>;
     fn child_item(&mut self, parent: &Item, index: u64) -> Result<Item, CaptureError>;
-    fn item_count(&mut self, parent: &Option<Item>) -> Result<u64, CaptureError>;
+    fn item_count(&mut self) -> Result<u64, CaptureError>;
     fn child_count(&mut self, parent: &Item) -> Result<u64, CaptureError>;
     fn item_end(&mut self, item_id: Self::ItemId)
         -> Result<Option<Self::ItemId>, CaptureError>;
@@ -759,13 +759,8 @@ impl ItemSource<TrafficItem> for Capture {
         })
     }
 
-    fn item_count(&mut self, parent: &Option<TrafficItem>)
-        -> Result<u64, CaptureError>
-    {
-        match parent {
-            None => Ok(self.item_index.len()),
-            Some(item) => self.child_count(item)
-        }
+    fn item_count(&mut self) -> Result<u64, CaptureError> {
+        Ok(self.item_index.len())
     }
 
     fn child_count(&mut self, parent: &TrafficItem)
@@ -1076,13 +1071,8 @@ impl ItemSource<DeviceItem> for Capture {
         })
     }
 
-    fn item_count(&mut self, parent: &Option<DeviceItem>)
-        -> Result<u64, CaptureError>
-    {
-        Ok(match parent {
-            None => (self.device_data.len() - 1) as u64,
-            Some(item) => self.child_count(item)?,
-        })
+    fn item_count(&mut self) -> Result<u64, CaptureError> {
+        Ok(self.device_data.len() as u64 - 1)
     }
 
     fn child_count(&mut self, parent: &DeviceItem)
