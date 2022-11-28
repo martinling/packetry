@@ -6,7 +6,7 @@ use std::ops::DerefMut;
 
 use thiserror::Error;
 
-use crate::capture::{Capture, CaptureError, ItemSource};
+use crate::capture::{Capture, CaptureError, ItemSource, CompletionStatus};
 
 #[derive(Error, Debug)]
 pub enum ModelError {
@@ -21,6 +21,7 @@ pub enum ModelError {
 }
 
 pub type ItemNodeRc<Item> = Rc<RefCell<ItemNode<Item>>>;
+pub type ItemNodeWeak<Item> = Weak<RefCell<ItemNode<Item>>>;
 type AnyNodeRc<Item> = Rc<RefCell<dyn Node<Item>>>;
 
 trait Node<Item> {
@@ -46,6 +47,9 @@ struct Children<Item> {
 
     /// Expanded children of this item.
     expanded: BTreeMap<u64, ItemNodeRc<Item>>,
+
+    /// Incomplete children of this item.
+    incomplete: BTreeMap<u64, ItemNodeWeak<Item>>,
 }
 
 impl<Item> Children<Item> {
@@ -53,7 +57,8 @@ impl<Item> Children<Item> {
         Children {
             direct_count: child_count,
             total_count: child_count,
-            expanded: BTreeMap::new()
+            expanded: BTreeMap::new(),
+            incomplete: BTreeMap::new(),
         }
     }
 }
@@ -96,6 +101,16 @@ impl<Item> Children<Item> {
         } else {
             self.expanded.remove(&child.item_index);
         }
+    }
+
+    /// Add an incomplete child.
+    fn incomplete_add(&mut self, index: u64, child_rc: &ItemNodeRc<Item>) {
+        self.incomplete.insert(index, Rc::downgrade(child_rc));
+    }
+
+    /// Fetch an incomplete child.
+    fn incomplete_fetch(&mut self, index: u64) -> Option<ItemNodeRc<Item>> {
+        self.incomplete.get(&index).and_then(Weak::upgrade)
     }
 }
 
@@ -200,6 +215,8 @@ where Item: Copy + 'static
                 // Add the rows removed for this child to the update.
                 update += child_rc.set_expanded(false)?;
             }
+            // There are no longer any visible incomplete children.
+            node.children.incomplete.clear();
         }
 
         // Add or remove this node from the parent's expanded children.
@@ -345,17 +362,34 @@ where Item: 'static + Copy,
         }
 
         // If we've broken out to this point, the node must be directly below `parent` - look it up.
+
+        // First, check if we already have an incomplete node for this item.
+        if let Some(node_rc) = parent_ref
+            .borrow_mut()
+            .children_mut()
+            .incomplete_fetch(relative_position)
+        {
+            return Ok(node_rc)
+        }
+
+        // Otherwise, fetch it from the database.
         let mut cap = self.capture.lock().or(Err(ModelError::LockError))?;
-        let parent = parent_ref.borrow();
-        let item = cap.item(&parent.item(), relative_position)?;
-        let (_completion, child_count) = cap.children(&item)?;
+        let parent_item = parent_ref.borrow().item();
+        let item = cap.item(&parent_item, relative_position)?;
+        let (completion, child_count) = cap.children(&item)?;
         let node = ItemNode {
             item,
             parent: Rc::downgrade(&parent_ref),
             item_index: relative_position,
             children: Children::new(child_count),
         };
-
-        Ok(Rc::new(RefCell::new(node)))
+        let node_rc = Rc::new(RefCell::new(node));
+        if matches!(completion, CompletionStatus::Ongoing) {
+            parent_ref
+                .borrow_mut()
+                .children_mut()
+                .incomplete_add(relative_position, &node_rc);
+        }
+        Ok(node_rc)
     }
 }
