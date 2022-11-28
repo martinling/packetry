@@ -186,8 +186,21 @@ where Item: Copy + 'static
         let parent_rc = node.parent
             .upgrade()
             .ok_or(ModelError::ParentDropped)?;
-        let child_count = node.children.total_count;
+        let child_count = node.children.direct_count;
         drop(node);
+
+        // Create an empty update that will collect all added/removed rows.
+        let mut update = ModelUpdate::default();
+
+        // If collapsing, first recursively collapse the children of this node.
+        if !expanded {
+            let mut node = self.borrow_mut();
+            let expanded_children = node.children.expanded.split_off(&0);
+            for (_index, child_rc) in expanded_children {
+                // Add the rows removed for this child to the update.
+                update += child_rc.set_expanded(false)?;
+            }
+        }
 
         // Add or remove this node from the parent's expanded children.
         parent_rc
@@ -195,15 +208,17 @@ where Item: Copy + 'static
             .children_mut()
             .set_expanded(self, expanded);
 
-        // Generate update.
-        let update = ModelUpdate {
+        // Add the effect of expanding/collapsing this node by itself.
+        let self_update = ModelUpdate {
             rows_added: if expanded { child_count } else { 0 },
             rows_removed: if expanded { 0 } else { child_count },
             rows_changed: 0,
         };
 
         // Propagate change in total rows back to the root.
-        self.update_row_counts(&update)?;
+        self.update_row_counts(&self_update)?;
+
+        update += self_update;
 
         Ok(update)
     }
