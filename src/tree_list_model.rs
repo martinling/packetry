@@ -36,6 +36,15 @@ trait Node<Item> {
 
     /// Mutably access the expanded children of this node.
     fn children_mut(&mut self) -> &mut Children<Item>;
+
+    /// Whether the children of this node are displayed.
+    fn expanded(&self) -> bool;
+
+    /// Update total row counts for this node and its parents.
+    fn update_total(&mut self, update: &ModelUpdate) -> Result<(), ModelError>;
+
+    /// Mark this node as completed.
+    fn set_completed(&mut self);
 }
 
 struct Children<Item> {
@@ -112,6 +121,15 @@ impl<Item> Children<Item> {
     fn incomplete_fetch(&mut self, index: u64) -> Option<ItemNodeRc<Item>> {
         self.incomplete.get(&index).and_then(Weak::upgrade)
     }
+
+    /// Get the number of rows between two children.
+    fn rows_between(&self, start: u64, end: u64) -> u64 {
+        (end - start) +
+            self.expanded
+                .range(start..end)
+                .map(|(_, node_rc)| node_rc.borrow().children.total_count)
+                .sum::<u64>()
+    }
 }
 
 impl<Item> Node<Item> for RootNode<Item> {
@@ -130,6 +148,20 @@ impl<Item> Node<Item> for RootNode<Item> {
     fn children_mut(&mut self) -> &mut Children<Item> {
         &mut self.children
     }
+
+    fn expanded(&self) -> bool {
+        true
+    }
+
+    fn update_total(&mut self, update: &ModelUpdate)
+        -> Result<(), ModelError>
+    {
+        self.children.total_count += update.rows_added;
+        self.children.total_count -= update.rows_removed;
+        Ok(())
+    }
+
+    fn set_completed(&mut self) {}
 }
 
 impl<Item> Node<Item> for ItemNode<Item> where Item: Copy {
@@ -148,10 +180,8 @@ impl<Item> Node<Item> for ItemNode<Item> where Item: Copy {
     fn children_mut(&mut self) -> &mut Children<Item> {
         &mut self.children
     }
-}
 
-impl<Item> ItemNode<Item> where Item: Copy {
-    pub fn expanded(&self) -> bool {
+    fn expanded(&self) -> bool {
         match self.parent.upgrade() {
             Some(parent_ref) => parent_ref
                 .borrow()
@@ -160,6 +190,36 @@ impl<Item> ItemNode<Item> where Item: Copy {
             // Parent is dropped, so node cannot be expanded.
             None => false
         }
+    }
+
+    fn update_total(&mut self, update: &ModelUpdate)
+        -> Result<(), ModelError>
+    {
+        self.children.total_count += update.rows_added;
+        self.children.total_count -= update.rows_removed;
+        self.parent
+            .upgrade()
+            .ok_or(ModelError::ParentDropped)?
+            .borrow_mut()
+            .update_total(update)?;
+        Ok(())
+    }
+
+    fn set_completed(&mut self) {
+        if let Some(parent_rc) = self.parent.upgrade() {
+            parent_rc
+                .borrow_mut()
+                .children_mut()
+                .incomplete
+                .remove(&self.item_index);
+        }
+    }
+}
+
+impl<Item> ItemNode<Item> where Item: Copy {
+
+    pub fn expanded(&self) -> bool {
+        Node::<Item>::expanded(self)
     }
 
     pub fn expandable(&self) -> bool {
@@ -189,7 +249,6 @@ impl<Item> ItemNode<Item> where Item: Copy {
 
 trait ItemNodeRcOps {
     fn set_expanded(&self, expanded: bool) -> Result<ModelUpdate, ModelError>;
-    fn update_row_counts(&self, update: &ModelUpdate) -> Result<(), ModelError>;
 }
 
 impl<Item> ItemNodeRcOps for ItemNodeRc<Item>
@@ -233,25 +292,11 @@ where Item: Copy + 'static
         };
 
         // Propagate change in total rows back to the root.
-        self.update_row_counts(&self_update)?;
+        self.borrow_mut().update_total(&self_update)?;
 
         update += self_update;
 
         Ok(update)
-    }
-
-    fn update_row_counts(&self, update: &ModelUpdate) -> Result<(), ModelError>
-    {
-        let mut current_node: AnyNodeRc<Item> = self.clone();
-        while let Some(parent_rc) = current_node.clone().borrow().parent()? {
-            let mut parent = parent_rc.borrow_mut();
-            let children = parent.children_mut();
-            children.total_count += update.rows_added;
-            children.total_count -= update.rows_removed;
-            drop(parent);
-            current_node = parent_rc;
-        }
-        Ok(())
     }
 }
 
@@ -273,6 +318,35 @@ impl core::ops::AddAssign for ModelUpdate {
 pub struct TreeListModel<Item> {
     capture: Arc<Mutex<Capture>>,
     root: Rc<RefCell<RootNode<Item>>>,
+}
+
+pub struct PendingUpdates<Item> {
+    position: u64,
+    node_rc: AnyNodeRc<Item>,
+    start_index: Option<u64>,
+    last_index: u64,
+    stack: Vec<PendingStackEntry<Item>>,
+    to_add: Option<u64>,
+    done: bool,
+}
+
+struct PendingStackEntry<Item> {
+    node_rc: AnyNodeRc<Item>,
+    start_index: u64,
+    last_index: u64,
+}
+
+impl<Item> PendingUpdates<Item> {
+    fn pop_stack(&mut self) -> bool {
+        if let Some(entry) = self.stack.pop() {
+            self.node_rc = entry.node_rc;
+            self.start_index = Some(entry.start_index);
+            self.last_index = entry.last_index;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl<Item> TreeListModel<Item>
@@ -306,28 +380,204 @@ where Item: 'static + Copy,
         node_ref.set_expanded(expanded)
     }
 
-    pub fn update(&mut self) -> Result<Option<(u64, ModelUpdate)>, ModelError> {
-        let mut cap = self.capture.lock().or(Err(ModelError::LockError))?;
-
-        let mut root = self.root.borrow_mut();
-        let new_item_count = cap.item_count()?;
-        let old_item_count = root.children.direct_count;
-
-        if new_item_count == old_item_count {
-            return Ok(None);
+    pub fn start_updates(&mut self) -> PendingUpdates<Item> {
+        println!("");
+        PendingUpdates {
+            position: 0,
+            node_rc: self.root.clone(),
+            last_index: 0,
+            start_index: Some(0),
+            stack: Vec::new(),
+            to_add: None,
+            done: false,
         }
+    }
 
-        let position = root.children.total_count;
-        let update = ModelUpdate {
-            rows_added: new_item_count - old_item_count,
-            rows_removed: 0,
-            rows_changed: 0,
+    pub fn next_update(&mut self,
+                       pending: &mut PendingUpdates<Item>)
+        -> Result<Option<(u64, ModelUpdate)>, ModelError>
+    {
+        // Work through the remaining incomplete items, returning an update
+        // for any that need it.
+        loop {
+            println!("Looping");
+            // First check if we were already in the middle of updating a node.
+            if let Some(children_added) = pending.to_add.take()
+            {
+                println!("Adding {} pending.to_add", children_added);
+                // This node is expanded and has new children to add.
+                // The children are added after all the rows of existing ones.
+                let end_position = pending.position;
+                let children_update = ModelUpdate {
+                    rows_added: children_added,
+                    rows_removed: 0,
+                    rows_changed: 0,
+                };
+
+                // Update this node's row count and propagate.
+                let mut node = pending.node_rc.borrow_mut();
+                let mut children = node.children_mut();
+                children.direct_count += children_added;
+                node.update_total(&children_update)?;
+
+                // Update the position to continue from.
+                pending.position += children_added;
+                println!("Advancing to new end at {}", pending.position);
+
+                return Ok(Some((end_position, children_update)));
+            }
+
+            // Otherwise if flagged as done, no further updates.
+            if pending.done {
+                println!("Done");
+                return Ok(None);
+            }
+
+            match pending.start_index {
+                Some(start) => {
+                    // Look for the next incomplete child of this node.
+                    if let Some((index, child_weak)) = {
+                        let next = pending.node_rc
+                            .borrow()
+                            .children()
+                            .incomplete
+                            .range(start..)
+                            .next()
+                            .map(|(i, weak)| (*i, weak.clone()));
+                        next
+                    } {
+                        println!("Found incomplete child at {}", index);
+                        if let Some(child_rc) = child_weak.upgrade() {
+                            // Found a live and incomplete child.
+                            println!("Child is live");
+
+                            // Advance current position up to this child.
+                            let node = pending.node_rc.borrow();
+                            let children = node.children();
+                            pending.position +=
+                                children.rows_between(
+                                    pending.last_index, index);
+                            println!("Advancing to child at {}",
+                                     pending.position);
+                            pending.last_index = index;
+                            drop(node);
+
+                            // Recurse down into this child.
+                            pending.stack.push(
+                                PendingStackEntry {
+                                    node_rc: pending.node_rc.clone(),
+                                    start_index: start + 1,
+                                    last_index: pending.last_index,
+                                }
+                            );
+                            pending.node_rc = child_rc;
+                            pending.start_index = Some(0);
+                            pending.last_index = 0;
+                        } else {
+                            println!("Child is dead");
+                            // Child no longer referenced, remove it.
+                            pending.node_rc
+                                .borrow_mut()
+                                .children_mut()
+                                .incomplete
+                                .remove(&index);
+                            pending.start_index = Some(index + 1);
+                        }
+                    } else {
+                        println!("No further children");
+                        // No incomplete children left.
+                        // Proceed to handling this node itself.
+                        pending.start_index = None;
+                    }
+                }
+                None => {
+                    println!("Processing node");
+                    // Check for updates to this node.
+                    let mut node = pending.node_rc.borrow_mut();
+                    let item = node.item();
+                    let expanded = node.expanded();
+
+                    // Check if this node had new children added.
+                    use CompletionStatus::*;
+                    let old_child_count = node.children().direct_count;
+                    let (completion, new_child_count) = {
+                        let mut cap = self.capture.lock()
+                            .or(Err(ModelError::LockError))?;
+                        match item {
+                            Some(item) => cap.children(&item)?,
+                            None => (Ongoing, cap.item_count()?)
+                        }
+                    };
+                    let completed = matches!(completion, Complete);
+                    let children_added = new_child_count - old_child_count;
+
+                    // If completed, remove from incomplete node list.
+                    if completed {
+                        node.set_completed();
+                    }
+
+                    // If expanded, advance to the end of this node's children.
+                    if expanded {
+                        let children = node.children_mut();
+                        pending.position +=
+                            children.rows_between(
+                                pending.last_index,
+                                children.direct_count);
+                        println!("Advancing to end at {}",
+                                 pending.position);
+                    }
+
+                    if children_added > 0 {
+                        println!("{} children added", children_added);
+                        // Some children were added. If this node was expanded,
+                        // we will need to deal with the added children on the
+                        // next loop iteration or call.
+                        if item.is_none() {
+                            // Root node.
+                            println!("Root children pending");
+                            // Handle added children on next loop iteration.
+                            pending.to_add.replace(children_added);
+                            // This will be the last update required.
+                            pending.done = true;
+                        } else {
+                            // Item node. Its own row will be updated.
+                            let mut node_position = pending.position - 1;
+                            if expanded {
+                                println!("Item children pending");
+                                // Adjust position for this node's children.
+                                node_position -= node.children().total_count;
+                                // Add the new children on next call.
+                                pending.to_add.replace(children_added);
+                            } else {
+                                // Update this node's row count.
+                                let children = node.children_mut();
+                                children.direct_count += children_added;
+                                // Done with this node, pop the stack.
+                                drop(node);
+                                println!("Popping stack");
+                                pending.pop_stack();
+                            }
+
+                            let node_update = ModelUpdate {
+                                rows_added: 0,
+                                rows_removed: 0,
+                                rows_changed: 1,
+                            };
+                            println!("Updating item node at {}/{}",
+                                     node_position,
+                                     self.row_count());
+                            return Ok(Some((node_position, node_update)));
+                        }
+                    } else {
+                        // No children were added. Try to pop the stack.
+                        drop(node);
+                        if !pending.pop_stack() {
+                            return Ok(None)
+                        }
+                    }
+                }
+            }
         };
-
-        root.children.direct_count = new_item_count;
-        root.children.total_count += update.rows_added;
-
-        Ok(Some((position, update)))
     }
 
     pub fn fetch(&self, position: u64) -> Result<ItemNodeRc<Item>, ModelError> {
