@@ -452,7 +452,7 @@ fn start_pcap(path: PathBuf) -> Result<(), PacketryError> {
                 }
             }
             let mut cap = capture.lock().or(Err(Lock))?;
-            cap.finish();
+            decoder.finish(&mut cap)?;
             cap.print_storage_summary();
             Ok(())
         };
@@ -504,7 +504,7 @@ fn start_luna() -> Result<(), PacketryError> {
                 decoder.handle_raw_packet(&mut cap, &packet?)?;
             }
             let mut cap = capture.lock().or(Err(Lock))?;
-            cap.finish();
+            decoder.finish(&mut cap)?;
             Ok(())
         };
         std::thread::spawn(move || {
