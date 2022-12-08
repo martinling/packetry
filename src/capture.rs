@@ -380,6 +380,15 @@ impl Transaction {
             (..) => false
         }
     }
+
+    fn outcome(&self) -> Option<PID> {
+        use PID::*;
+        match self.end_pid {
+            // Any handshake response should be displayed as an outcome.
+            ACK | NAK | NYET | STALL | ERR => Some(self.end_pid),
+            _ => None
+        }
+    }
 }
 
 pub fn fmt_count(count: u64) -> String {
@@ -1010,45 +1019,61 @@ impl ItemSource<TrafficItem> for Capture {
             },
             Transaction(_, transaction_id) => {
                 let transaction = self.transaction(*transaction_id)?;
-                let end_pid = transaction.end_pid;
                 use PID::*;
                 use StartComplete::*;
                 match (transaction.start_pid,
                        &transaction.split,
-                       transaction.payload_size())
+                       transaction.payload_size(),
+                       transaction.outcome())
                 {
                     (SOF, ..) => format!(
                         "{} SOF packets", transaction.packet_count()),
                     (Malformed, ..) => format!(
                         "{} malformed packets", transaction.packet_count()),
-                    (SPLIT, Some((split_fields, token_pid)), payload_size) => {
+                    (SPLIT, Some((split_fields, token_pid)), size, outcome) => {
                         format!("{} {} transaction{}",
                             match split_fields.sc() {
                                 Start => "Starting",
                                 Complete => "Completing",
                             },
                             token_pid,
-                            match payload_size {
-                                None => format!(", {}", end_pid),
-                                Some(size) if size == 0 => format!(
-                                    " with no data, {}", end_pid),
-                                Some(size) => format!(
+                            match (size, outcome) {
+                                (None, None) => String::from(""),
+                                (None, Some(outcome)) =>
+                                    format!(", {}", outcome),
+                                (Some(size), None) if size == 0 =>
+                                    String::from(" with no data"),
+                                (Some(size), Some(outcome)) if size == 0 =>
+                                    format!(" with no data, {}", outcome),
+                                (Some(size), None) => format!(
+                                    " with {} data bytes: {}",
+                                    size, Bytes::first(100,
+                                        &self.transaction_bytes(&transaction)?)
+                                ),
+                                (Some(size), Some(outcome)) => format!(
                                     " with {} data bytes, {}: {}",
-                                    size, end_pid, Bytes::first(
-                                        100,
-                                        &self.transaction_bytes(&transaction)?))
+                                    size, outcome, Bytes::first(100,
+                                        &self.transaction_bytes(&transaction)?)
+                                ),
                             }
                         )
                     },
-                    (pid, _, None) => format!(
-                        "{} transaction, {}", pid, end_pid),
-                    (pid, _, Some(size)) if size == 0 => format!(
-                        "{} transaction with no data, {}",
-                        pid, end_pid),
-                    (pid, _, Some(size)) => format!(
+                    (pid, _, None, None) => format!(
+                        "{} transaction", pid),
+                    (pid, _, None, Some(outcome)) => format!(
+                        "{} transaction, {}", pid, outcome),
+                    (pid, _, Some(size), None) if size == 0 => format!(
+                        "{} transaction with no data", pid),
+                    (pid, _, Some(size), Some(outcome)) if size == 0 => format!(
+                        "{} transaction with no data, {}", pid, outcome),
+                    (pid, _, Some(size), None) => format!(
+                        "{} transaction with {} data bytes: {}",
+                        pid, size, Bytes::first(100,
+                            &self.transaction_bytes(&transaction)?)),
+                    (pid, _, Some(size), Some(outcome)) => format!(
                         "{} transaction with {} data bytes, {}: {}",
-                        pid, size, end_pid,
-                        Bytes::first(100, &self.transaction_bytes(&transaction)?))
+                        pid, size, outcome, Bytes::first(100,
+                            &self.transaction_bytes(&transaction)?)),
                 }
             },
             Transfer(transfer_id) => {
