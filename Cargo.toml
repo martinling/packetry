@@ -33,6 +33,7 @@ serde_json = "1.0.85"
 step-decoder = []
 record-ui-test = ["serde", "serde_json"]
 test-ui-replay = ["serde", "serde_json"]
+debug-region-map = []
 
 [[test]]
 name = "test_replay"
