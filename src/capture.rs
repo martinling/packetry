@@ -941,15 +941,17 @@ impl Capture {
             let ep_first_item_id = ep_traf.first_item_id.ok_or_else(||
                 IndexError(format!(
                     "Endpoint ID {} has no first item", endpoint_id)))?;
+            let transaction_range =
+                ep_traf.transfer_index.target_range(
+                    entry.transfer_id(),
+                    ep_traf.transaction_ids.len())?;
             Ok(Transfer {
                 ep_first_item_id,
                 start_item_id,
                 transfer_id: *transfer_id,
                 endpoint_id,
-                transaction_range:
-                    ep_traf.transfer_index.target_range(
-                        entry.transfer_id(),
-                        ep_traf.transaction_ids.len())?,
+                first_ep_transaction_id: transaction_range.start,
+                transaction_range,
             })
         } else {
             Err(IndexError(format!("Item {:?} is not a transfer", item)))
@@ -1031,6 +1033,7 @@ struct Transfer {
     start_item_id: TrafficItemId,
     transfer_id: TransferId,
     endpoint_id: EndpointId,
+    first_ep_transaction_id: EndpointTransactionId,
     transaction_range: Range<EndpointTransactionId>,
 }
 
@@ -1245,7 +1248,8 @@ impl ItemSource<TrafficItem> for Capture {
                 let transaction_id =
                     ep_traf.transaction_ids.get(ep_transaction_id)?;
                 let parent_index = transfer.start_item_id.value;
-                let child_index = ep_transaction_id.value;
+                let child_index =
+                    ep_transaction_id - transfer.first_ep_transaction_id;
                 let item = Transaction(
                     transfer.transfer_id, transaction_id);
                 return Ok(NextLevelItem(
@@ -1311,8 +1315,8 @@ impl ItemSource<TrafficItem> for Capture {
                     // If the index equals the count, return the pivot.
                     let parent_index =
                         transfers[longest].start_item_id.value;
-                    let child_index =
-                        transfers[longest].transaction_range.start.value + index;
+                    let child_index = ep_transaction_id -
+                        transfers[longest].first_ep_transaction_id;
                     let item = Transaction(
                         transfers[longest].transfer_id, pivot_transaction_id);
                     return Ok(NextLevelItem(
@@ -1356,7 +1360,8 @@ impl ItemSource<TrafficItem> for Capture {
             .ok_or_else(||
                 IndexError(String::from("Index not found")))?;
         let parent_index = transfer.start_item_id.value;
-        let child_index = transfer.transaction_range.start.value;
+        let child_index = transfer.transaction_range.start -
+            transfer.first_ep_transaction_id;
         let item = Transaction(transfer.transfer_id, *transaction_id);
         Ok(NextLevelItem(span_index, parent_index, child_index, item))
     }
