@@ -813,8 +813,13 @@ where Item: 'static + Copy + Debug,
                 let expanded_2 = parent_expanded.with(node_ref);
                 let expanded_3 = parent_expanded.clone();
                 let node_expanded = ItemNodeSet::new(node_ref);
-                let changed = self.count_within(parent_expanded, &range_2)?;
-                let added = self.count_within(&node_expanded, &range_2)?;
+                let total_changed = self.count_within(parent_expanded, &range_2)?;
+                let rows_present = parent.length - relative_position;
+                let changed = min(total_changed, rows_present);
+                let (_, added) = self.count_around_offset(
+                    &node_expanded, &range_2, node_ref,
+                    parent.offset,
+                    parent.offset + parent.length)?;
                 if parent.offset != 0 {
                     // Update the range end of previous parts of this parent.
                     for region in self.regions
@@ -850,9 +855,7 @@ where Item: 'static + Copy + Debug,
                         offset: 0,
                         length: changed + added,
                     },
-                    if relative_position + changed == parent.length {
-                        vec![]
-                    } else {
+                    if rows_present > changed {
                         vec![
                             Region {
                                 source: TopLevelItems(),
@@ -862,12 +865,11 @@ where Item: 'static + Copy + Debug,
                             Region {
                                 source: InterleavedSearch(expanded_3, range_3),
                                 offset: 0,
-                                length: parent.length
-                                    - relative_position
-                                    - changed
-                                    - 1,
+                                length: rows_present - changed - 1,
                             }
                         ]
+                    } else {
+                        vec![]
                     }
                 )?
             },
