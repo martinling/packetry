@@ -751,8 +751,7 @@ where Item: 'static + Copy + Debug,
         // Remove all following regions, to iterate over later.
         let mut following_regions = self.regions
             .borrow_mut()
-            .split_off(&parent_start)
-            .into_iter();
+            .split_off(&parent_start);
 
         let more_after = following_regions.len() > 0;
 
@@ -822,18 +821,32 @@ where Item: 'static + Copy + Debug,
                     parent.offset + parent.length)?;
                 if parent.offset != 0 {
                     // Update the range end of previous parts of this parent.
-                    for region in self.regions
-                        .borrow_mut()
-                        .values_mut()
-                        .rev()
-                    {
-                        if let InterleavedSearch(_expanded, range) =
-                            &mut region.source
-                        {
-                            range.end = node_start;
-                            if region.offset == 0 {
-                                break
-                            }
+                    for region in self.regions.borrow_mut().values_mut().rev() {
+                        match &mut region.source {
+                            TopLevelItems() => break,
+                            ChildrenOf(..) => continue,
+                            InterleavedSearch(_, range)
+                                if range.end > node_start =>
+                            {
+                                range.end = node_start;
+                            },
+                            InterleavedSearch(..) => break
+                        }
+                    }
+                }
+                if total_changed > rows_present {
+                    // Update the range start of following parts of this parent.
+                    for region in following_regions.values_mut() {
+                        match &mut region.source {
+                            TopLevelItems() => break,
+                            ChildrenOf(..) => continue,
+                            InterleavedSearch(_, range)
+                                if range.start < next_item =>
+                            {
+                                range.start = next_item;
+                                region.offset -= relative_position;
+                            },
+                            InterleavedSearch(..) => break
                         }
                     }
                 }
@@ -882,6 +895,7 @@ where Item: 'static + Copy + Debug,
         drop(node);
 
         // For an interleaved source, update all regions that it overlaps.
+        let mut following_regions = following_regions.into_iter();
         if interleaved {
             while let Some((start, region)) = following_regions.next() {
                 let more_after = following_regions.len() > 0;
