@@ -2145,30 +2145,34 @@ where Item: 'static + Copy + Debug,
                 InternalError(format!(
                     "No region before position {}", position)))?;
 
-        // Get the index of this row relative to the start of that region.
-        let mut relative_position = region.offset + (position - start);
+        // Get the index of this row relative to the start of the region source.
+        let row_index = region.offset + (position - start);
 
         // Get the parent for this row, according to the type of region.
         let mut cap = self.capture.lock().or(Err(ModelError::LockError))?;
-        let (parent_ref, item): (AnyNodeRc<Item>, Item) = match region.source {
+        let (parent_ref, item_index, item):
+            (AnyNodeRc<Item>, u64, Item) =
+            match region.source
+        {
             TopLevelItems() => (
                 self.root.clone(),
-                cap.item(None, relative_position)?),
+                row_index,
+                cap.item(None, row_index)?),
             ChildrenOf(node_ref) => (
                 node_ref.clone(),
-                cap.item(Some(&node_ref.borrow().item), relative_position)?),
+                row_index,
+                cap.item(Some(&node_ref.borrow().item), row_index)?),
             InterleavedSearch(expanded, range) => {
                 // Run the interleaved search.
                 let mut expanded_items = expanded.iter_items();
                 let search_result = cap.find_child(
-                    &mut expanded_items, &range, relative_position)?;
+                    &mut expanded_items, &range, row_index)?;
                 // Return a node corresponding to the search result.
                 use SearchResult::*;
                 match search_result {
                     // Search found a top level item.
                     TopLevelItem(index, item) => {
-                        relative_position = index;
-                        (self.root.clone(), item)
+                        (self.root.clone(), index, item)
                     },
                     // Search found a child of an expanded top level item.
                     NextLevelItem(_, parent_index, child_index, item) => {
@@ -2178,8 +2182,7 @@ where Item: 'static + Copy + Debug,
                             .children()
                             .get_expanded(parent_index)
                             .ok_or(ModelError::ParentDropped)?;
-                        relative_position = child_index;
-                        (parent_ref, item)
+                        (parent_ref, child_index, item)
                     }
                 }
             }
@@ -2191,7 +2194,7 @@ where Item: 'static + Copy + Debug,
             .borrow()
             .children()
             .expanded
-            .get(&relative_position)
+            .get(&item_index)
         {
             return Ok(node_rc.clone())
         }
@@ -2200,17 +2203,17 @@ where Item: 'static + Copy + Debug,
         if let Some(node_rc) = parent_ref
             .borrow()
             .children()
-            .fetch_incomplete(relative_position)
+            .fetch_incomplete(item_index)
         {
             return Ok(node_rc)
         }
 
-        // Otherwise, fetch it from the database.
+        // Otherwise, create a new node.
         let (completion, child_count) = cap.item_children(Some(&item))?;
         let node = ItemNode {
             item,
             parent: Rc::downgrade(&parent_ref),
-            item_index: relative_position,
+            item_index,
             completion,
             children: Children::new(child_count),
             widgets: RefCell::new(HashSet::new()),
@@ -2220,7 +2223,7 @@ where Item: 'static + Copy + Debug,
             parent_ref
                 .borrow_mut()
                 .children_mut()
-                .add_incomplete(relative_position, &node_rc);
+                .add_incomplete(item_index, &node_rc);
         }
         Ok(node_rc)
     }
