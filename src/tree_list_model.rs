@@ -1169,8 +1169,7 @@ where Item: 'static + Copy + Debug,
                             Region {
                                 source: InterleavedSearch(expanded_1, range_1),
                                 offset: region.offset + added_before_offset,
-                                length: split_offset + added_after_offset + 1,
-                                // TODO: why is this + 1 needed?
+                                length: split_offset + added_after_offset,
                             }
                         ],
                         vec![
