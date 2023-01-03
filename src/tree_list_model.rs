@@ -785,24 +785,36 @@ where Item: 'static + Copy + Debug,
                 let expanded = ItemNodeSet::new(node_ref);
                 let range = node_start..next_item;
                 let added = self.count_within(&expanded, &range)?;
-                self.split_parent(parent_start, &parent, node_ref, more_after,
-                    vec![Region {
-                        source: TopLevelItems(),
-                        offset: parent.offset,
-                        length: relative_position,
-                    }],
-                    Region {
-                        source: InterleavedSearch(expanded, range),
-                        offset: 0,
-                        length: added,
-                    },
-                    vec![Region {
-                        source: TopLevelItems(),
-                        offset: parent.offset + relative_position,
-                        length: parent.length - relative_position,
-                    }]
-                )?
-             },
+                if parent.length == 1 &&
+                    parent_start + parent.length != self.row_count()
+                {
+                    // There's nothing to split, and there must already be an
+                    // interleaved region after this, so keep the parent as is.
+                    let mut update = ModelUpdate::default();
+                    self.preserve_region(
+                        &mut update, parent_start, &parent, false)?;
+                    update
+                } else {
+                    self.split_parent(
+                        parent_start, &parent, node_ref, more_after,
+                        vec![Region {
+                            source: TopLevelItems(),
+                            offset: parent.offset,
+                            length: relative_position,
+                        }],
+                        Region {
+                            source: InterleavedSearch(expanded, range),
+                            offset: 0,
+                            length: added,
+                        },
+                        vec![Region {
+                            source: TopLevelItems(),
+                            offset: parent.offset + relative_position,
+                            length: parent.length - relative_position,
+                        }]
+                    )?
+                }
+            },
             // New interleaved region expanded from within an existing one.
             (true, InterleavedSearch(parent_expanded, parent_range)) => {
                 let range_1 = parent_range.start..node_start;
