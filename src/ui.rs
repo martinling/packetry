@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::fmt::Debug;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
 use std::mem::size_of;
@@ -263,7 +264,7 @@ fn create_view<Item, Model, RowData>(
         recording_args: (&Rc<RefCell<Recording>>, &'static str))
     -> (Model, ListView)
     where
-        Item: Copy + 'static,
+        Item: Copy + PartialOrd + Debug + 'static,
         Model: GenericModel<Item> + IsA<ListModel> + IsA<Object>,
         RowData: GenericRowData<Item> + IsA<Object>,
         CaptureReader: ItemSource<Item>,
