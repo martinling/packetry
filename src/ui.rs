@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::fmt::Debug;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
@@ -516,7 +517,7 @@ fn create_view<Item, Model, RowData>(
         recording_args: (&Rc<RefCell<Recording>>, &'static str))
     -> (Model, ColumnView)
     where
-        Item: Copy + 'static,
+        Item: Copy + PartialOrd + Debug + 'static,
         Model: GenericModel<Item> + IsA<ListModel> + IsA<Object>,
         RowData: GenericRowData<Item> + IsA<Object>,
         CaptureReader: ItemSource<Item>,
