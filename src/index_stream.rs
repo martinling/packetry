@@ -97,34 +97,14 @@ where Position: Copy + From<u64> + Into<u64> + Add<u64, Output=Position>,
         Ok(values)
     }
 
-    /// Get the range of values between the specified position and the next.
-    ///
-    /// The length of the data referenced by this index must be passed
-    /// as a parameter. If the specified position is the last in the
-    /// index, the range will be from the last value in the index to the
-    /// end of the referenced data.
-    pub fn target_range(&mut self, position: Position, target_length: u64)
-        -> Result<Range<Value>, StreamError>
-    {
-        let range = if position.into() + 2 > self.len() {
-            let start = self.get(position)?;
-            let end = Value::from(target_length);
-            start..end
-        } else {
-            let vec = self.get_range(&(position..(position + 2)))?;
-            let start = vec[0];
-            let end = vec[1];
-            start..end
-        };
-        Ok(range)
-    }
-
     /// Leftmost position where a value would be ordered within this index.
     pub fn bisect_left(&mut self, value: &Value)
         -> Result<Position, StreamError>
     {
         let range = Position::from(0)..Position::from(self.len());
-        self.bisect_range_left(&range, value)
+        let values = self.get_range(&range)?;
+        let position = Position::from(bisect_left(&values, value) as u64);
+        Ok(position)
     }
 
     /// Rightmost position where a value would be ordered within this index.
@@ -132,23 +112,7 @@ where Position: Copy + From<u64> + Into<u64> + Add<u64, Output=Position>,
         -> Result<Position, StreamError>
     {
         let range = Position::from(0)..Position::from(self.len());
-        self.bisect_range_right(&range, value)
-    }
-
-    /// Leftmost position where a value would be ordered within this range.
-    pub fn bisect_range_left(&mut self, range: &Range<Position>, value: &Value)
-        -> Result<Position, StreamError>
-    {
-        let values = self.get_range(range)?;
-        let position = Position::from(bisect_left(&values, value) as u64);
-        Ok(position)
-    }
-
-    /// Rightmost position where a value would be ordered within this range.
-    pub fn bisect_range_right(&mut self, range: &Range<Position>,value: &Value)
-        -> Result<Position, StreamError>
-    {
-        let values = self.get_range(range)?;
+        let values = self.get_range(&range)?;
         let position = Position::from(bisect_right(&values, value) as u64);
         Ok(position)
     }
