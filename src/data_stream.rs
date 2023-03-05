@@ -90,6 +90,11 @@ where Value: Pod + Default
         self.stream_reader.len() / size_of::<Value>() as u64
     }
 
+    /// Number of items in one block of the stream.
+    pub const fn block_length(&self) -> usize {
+        self.stream_reader.block_size() / size_of::<Value>()
+    }
+
     /// Current size of the stream in bytes.
     pub fn size(&self) -> u64 {
         self.stream_reader.len()

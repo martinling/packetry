@@ -247,6 +247,11 @@ impl StreamReader {
         self.shared.length.load(Acquire)
     }
 
+    /// Get the block size of the stream, in bytes.
+    pub const fn block_size(&self) -> usize {
+        BLOCK_SIZE
+    }
+
     /// Access data in the stream.
     ///
     /// Returns a reference to a slice of data, which may have less than the
