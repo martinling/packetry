@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 use std::mem::size_of;
-use std::ops::Range;
+use std::ops::{Deref, Range};
 
 use bytemuck::{bytes_of, cast_slice, from_bytes, Pod};
 
@@ -19,6 +19,12 @@ pub struct DataWriter<Value> {
 pub struct DataReader<Value> {
     marker: PhantomData<Value>,
     stream_reader: StreamReader,
+}
+
+/// A read-only handle to values that are part of the stream.
+struct Values<Data, Value> where Data: Deref<Target=[u8]> {
+    marker: PhantomData<Value>,
+    data: Data,
 }
 
 /// Construct a new data stream.
@@ -111,6 +117,32 @@ where Value: Pod + Default
             byte_range.start += bytes.len() as u64;
         }
         Ok(result)
+    }
+
+    /// Access values in the stream.
+    ///
+    /// Returns a reference to a slice of values, which may have less than the
+    /// requested length. May be called again to access further values.
+    ///
+    pub fn access(&mut self, range: &Range<Id<Value>>)
+        -> Result<impl Deref<Target=[Value]>, StreamError>
+    {
+        let range = range.start.offset()..range.end.offset();
+        Ok(Values {
+            marker: PhantomData,
+            data: self.stream_reader.access(&range)?
+        })
+    }
+}
+
+impl<Data, Value> Deref for Values<Data, Value>
+where Data: Deref<Target=[u8]>,
+      Value: Pod
+{
+    type Target = [Value];
+
+    fn deref(&self) -> &[Value] {
+        cast_slice(self.data.deref())
     }
 }
 
