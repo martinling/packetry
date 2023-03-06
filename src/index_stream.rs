@@ -1,3 +1,4 @@
+use std::cmp::min;
 use std::marker::PhantomData;
 use std::ops::{Add, Range};
 
@@ -65,7 +66,7 @@ where Position: From<u64>, Value: Into<u64>
 
 impl<Position, Value> IndexReader<Position, Value>
 where Position: Copy + From<u64> + Into<u64> + Add<u64, Output=Position>,
-      Value: Copy + From<u64> + Ord
+      Value: Copy + From<u64> + Into<u64> + Ord
 {
     /// Current number of indices in the index.
     pub fn len(&self) -> u64 {
@@ -101,20 +102,72 @@ where Position: Copy + From<u64> + Into<u64> + Add<u64, Output=Position>,
     pub fn bisect_left(&mut self, value: &Value)
         -> Result<Position, StreamError>
     {
-        let range = Position::from(0)..Position::from(self.len());
-        let values = self.get_range(&range)?;
-        let position = Position::from(bisect_left(&values, value) as u64);
-        Ok(position)
+        let value = (*value).into();
+        let length = self.len();
+        if length == 0 {
+            return Ok(Position::from(0));
+        }
+        let block_length = self.data_reader.block_length() as u64;
+        let block_mask = block_length - 1;
+        let mut start = (length / 2) & !block_mask;
+        let position = loop {
+            let end = min(start + block_length, length);
+            let last = ((end - start) as usize) - 1;
+            let range = start.into()..end.into();
+            let values = self.data_reader.access(&range)?;
+            if values[0] >= value {
+                if start == 0 {
+                    break 0
+                } else {
+                    start = (start / 2) & !block_mask;
+                }
+            } else if values[last] < value {
+                if end == length {
+                    break length;
+                } else {
+                    start = (end + (length - end) / 2) & !block_mask;
+                }
+            } else {
+                break start + bisect_left(&values, &value) as u64;
+            }
+        };
+        Ok(Position::from(position))
     }
 
     /// Rightmost position where a value would be ordered within this index.
     pub fn bisect_right(&mut self, value: &Value)
         -> Result<Position, StreamError>
     {
-        let range = Position::from(0)..Position::from(self.len());
-        let values = self.get_range(&range)?;
-        let position = Position::from(bisect_right(&values, value) as u64);
-        Ok(position)
+        let value = (*value).into();
+        let length = self.len();
+        if length == 0 {
+            return Ok(Position::from(0));
+        }
+        let block_length = self.data_reader.block_length() as u64;
+        let block_mask = block_length - 1;
+        let mut start = (length / 2) & !block_mask;
+        let position = loop {
+            let end = min(start + block_length, length);
+            let last = ((end - start) as usize) - 1;
+            let range = start.into()..end.into();
+            let values = self.data_reader.access(&range)?;
+            if values[0] > value {
+                if start == 0 {
+                    break 0
+                } else {
+                    start = (start / 2) & !block_mask;
+                }
+            } else if values[last] <= value {
+                if end == length {
+                    break length;
+                } else {
+                    start = (end + (length - end) / 2) & !block_mask;
+                }
+            } else {
+                break start + bisect_right(&values, &value) as u64;
+            }
+        };
+        Ok(Position::from(position))
     }
 }
 
