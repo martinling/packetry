@@ -39,7 +39,7 @@ At traffic row 7:
 Updating after 5 packets decoded
 At traffic row 3:
 - Incomplete control transfer on device 0
-+ Getting device descriptor #0 for device 0, reading 0 of 64 requested bytes
++ Getting device descriptor #0 for device 0, reading 0 of 64 requested bytes, incomplete
 At traffic row 8:
 + IN transaction on 0.0
 Expanding traffic view, row 8: IN transaction on 0.0
@@ -54,7 +54,7 @@ At traffic row 10:
 Updating after 7 packets decoded
 At traffic row 3:
 - Incomplete control transfer on device 0
-+ Getting device descriptor #0 for device 0, reading 0 of 64 requested bytes
++ Getting device descriptor #0 for device 0, reading 0 of 64 requested bytes, incomplete
 At traffic row 11:
 + IN transaction on 0.0
 Expanding traffic view, row 11: IN transaction on 0.0
@@ -69,7 +69,7 @@ At traffic row 13:
 Updating after 9 packets decoded
 At traffic row 3:
 - Incomplete control transfer on device 0
-+ Getting device descriptor #0 for device 0, reading 0 of 64 requested bytes
++ Getting device descriptor #0 for device 0, reading 0 of 64 requested bytes, incomplete
 At traffic row 14:
 + IN transaction on 0.0
 Expanding traffic view, row 14: IN transaction on 0.0
@@ -90,7 +90,7 @@ At traffic row 17:
 Updating after 12 packets decoded
 At traffic row 3:
 - Incomplete control transfer on device 0
-+ Getting device descriptor #0 for device 0, reading 8 of 64 requested bytes
++ Getting device descriptor #0 for device 0, reading 8 of 64 requested bytes, incomplete
 At traffic row 18:
 + IN transaction on 0.0
 Updating after 13 packets decoded
@@ -100,7 +100,7 @@ At traffic row 18:
 Updating after 14 packets decoded
 At traffic row 3:
 - Incomplete control transfer on device 0
-+ Getting device descriptor #0 for device 0, reading 8 of 64 requested bytes
++ Getting device descriptor #0 for device 0, reading 8 of 64 requested bytes, incomplete
 At traffic row 19:
 + IN transaction on 0.0
 Updating after 15 packets decoded
@@ -110,7 +110,7 @@ At traffic row 19:
 Updating after 16 packets decoded
 At traffic row 3:
 - Incomplete control transfer on device 0
-+ Getting device descriptor #0 for device 0, reading 8 of 64 requested bytes
++ Getting device descriptor #0 for device 0, reading 8 of 64 requested bytes, incomplete
 At traffic row 20:
 + IN transaction on 0.0
 Updating after 17 packets decoded
@@ -124,7 +124,7 @@ At traffic row 20:
 Updating after 19 packets decoded
 At traffic row 3:
 - Incomplete control transfer on device 0
-+ Getting device descriptor #0 for device 0, reading 16 of 64 requested bytes
++ Getting device descriptor #0 for device 0, reading 16 of 64 requested bytes, incomplete
 At traffic row 21:
 + IN transaction on 0.0
 Updating after 20 packets decoded
@@ -134,7 +134,7 @@ At traffic row 21:
 Updating after 21 packets decoded
 At traffic row 3:
 - Incomplete control transfer on device 0
-+ Getting device descriptor #0 for device 0, reading 16 of 64 requested bytes
++ Getting device descriptor #0 for device 0, reading 16 of 64 requested bytes, incomplete
 At traffic row 22:
 + IN transaction on 0.0
 Updating after 22 packets decoded
@@ -148,7 +148,7 @@ At traffic row 22:
 Updating after 24 packets decoded
 At traffic row 3:
 - Incomplete control transfer on device 0
-+ Getting device descriptor #0 for device 0, reading 18 of 64 requested bytes
++ Getting device descriptor #0 for device 0, reading 18 of 64 requested bytes, incomplete
 At traffic row 23:
 + OUT transaction on 0.0
 Updating after 25 packets decoded
@@ -167,12 +167,12 @@ Updating after 29 packets decoded
 Updating after 30 packets decoded
 At traffic row 24:
 - Incomplete control transfer on device 0
-+ Setting address to 4 for device 0
++ Setting address to 4 for device 0, incomplete
 Updating after 31 packets decoded
 Updating after 32 packets decoded
 At traffic row 24:
 - Incomplete control transfer on device 0
-+ Setting address to 4 for device 0
++ Setting address to 4 for device 0, incomplete
 Updating after 33 packets decoded
 Updating after 34 packets decoded
 Updating after 35 packets decoded
@@ -234,50 +234,50 @@ Updating after 37 packets decoded
 Updating after 38 packets decoded
 At traffic row 25:
 - Incomplete control transfer on device 4
-+ Getting device descriptor #0 for device 4, reading 0 of 18 requested bytes
++ Getting device descriptor #0 for device 4, reading 0 of 18 requested bytes, incomplete
 Updating after 39 packets decoded
 Updating after 40 packets decoded
 At traffic row 25:
 - Incomplete control transfer on device 4
-+ Getting device descriptor #0 for device 4, reading 0 of 18 requested bytes
++ Getting device descriptor #0 for device 4, reading 0 of 18 requested bytes, incomplete
 Updating after 41 packets decoded
 Updating after 42 packets decoded
 At traffic row 25:
 - Incomplete control transfer on device 4
-+ Getting device descriptor #0 for device 4, reading 0 of 18 requested bytes
++ Getting device descriptor #0 for device 4, reading 0 of 18 requested bytes, incomplete
 Updating after 43 packets decoded
 Updating after 44 packets decoded
 Updating after 45 packets decoded
 At traffic row 25:
 - Incomplete control transfer on device 4
-+ Getting device descriptor #0 for device 4, reading 8 of 18 requested bytes
++ Getting device descriptor #0 for device 4, reading 8 of 18 requested bytes, incomplete
 Updating after 46 packets decoded
 Updating after 47 packets decoded
 At traffic row 25:
 - Incomplete control transfer on device 4
-+ Getting device descriptor #0 for device 4, reading 8 of 18 requested bytes
++ Getting device descriptor #0 for device 4, reading 8 of 18 requested bytes, incomplete
 Updating after 48 packets decoded
 Updating after 49 packets decoded
 At traffic row 25:
 - Incomplete control transfer on device 4
-+ Getting device descriptor #0 for device 4, reading 8 of 18 requested bytes
++ Getting device descriptor #0 for device 4, reading 8 of 18 requested bytes, incomplete
 Updating after 50 packets decoded
 Updating after 51 packets decoded
 Updating after 52 packets decoded
 At traffic row 25:
 - Incomplete control transfer on device 4
-+ Getting device descriptor #0 for device 4, reading 16 of 18 requested bytes
++ Getting device descriptor #0 for device 4, reading 16 of 18 requested bytes, incomplete
 Updating after 53 packets decoded
 Updating after 54 packets decoded
 At traffic row 25:
 - Incomplete control transfer on device 4
-+ Getting device descriptor #0 for device 4, reading 16 of 18 requested bytes
++ Getting device descriptor #0 for device 4, reading 16 of 18 requested bytes, incomplete
 Updating after 55 packets decoded
 Updating after 56 packets decoded
 Updating after 57 packets decoded
 At traffic row 25:
 - Incomplete control transfer on device 4
-+ Getting device descriptor #0 for device 4, reading 18 bytes
++ Getting device descriptor #0 for device 4, reading 18 bytes, incomplete
 Updating after 58 packets decoded
 Updating after 59 packets decoded
 At devices row 0:
@@ -309,34 +309,34 @@ Updating after 62 packets decoded
 Updating after 63 packets decoded
 At traffic row 26:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 0 of 9 requested bytes
++ Getting configuration descriptor #0 for device 4, reading 0 of 9 requested bytes, incomplete
 Updating after 64 packets decoded
 Updating after 65 packets decoded
 At traffic row 26:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 0 of 9 requested bytes
++ Getting configuration descriptor #0 for device 4, reading 0 of 9 requested bytes, incomplete
 Updating after 66 packets decoded
 Updating after 67 packets decoded
 At traffic row 26:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 0 of 9 requested bytes
++ Getting configuration descriptor #0 for device 4, reading 0 of 9 requested bytes, incomplete
 Updating after 68 packets decoded
 Updating after 69 packets decoded
 Updating after 70 packets decoded
 At traffic row 26:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 8 of 9 requested bytes
++ Getting configuration descriptor #0 for device 4, reading 8 of 9 requested bytes, incomplete
 Updating after 71 packets decoded
 Updating after 72 packets decoded
 At traffic row 26:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 8 of 9 requested bytes
++ Getting configuration descriptor #0 for device 4, reading 8 of 9 requested bytes, incomplete
 Updating after 73 packets decoded
 Updating after 74 packets decoded
 Updating after 75 packets decoded
 At traffic row 26:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 9 bytes
++ Getting configuration descriptor #0 for device 4, reading 9 bytes, incomplete
 Updating after 76 packets decoded
 Updating after 77 packets decoded
 At devices row 0:
@@ -368,82 +368,82 @@ Updating after 80 packets decoded
 Updating after 81 packets decoded
 At traffic row 27:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 0 of 34 requested bytes
++ Getting configuration descriptor #0 for device 4, reading 0 of 34 requested bytes, incomplete
 Updating after 82 packets decoded
 Updating after 83 packets decoded
 At traffic row 27:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 0 of 34 requested bytes
++ Getting configuration descriptor #0 for device 4, reading 0 of 34 requested bytes, incomplete
 Updating after 84 packets decoded
 Updating after 85 packets decoded
 At traffic row 27:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 0 of 34 requested bytes
++ Getting configuration descriptor #0 for device 4, reading 0 of 34 requested bytes, incomplete
 Updating after 86 packets decoded
 Updating after 87 packets decoded
 Updating after 88 packets decoded
 At traffic row 27:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 8 of 34 requested bytes
++ Getting configuration descriptor #0 for device 4, reading 8 of 34 requested bytes, incomplete
 Updating after 89 packets decoded
 Updating after 90 packets decoded
 At traffic row 27:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 8 of 34 requested bytes
++ Getting configuration descriptor #0 for device 4, reading 8 of 34 requested bytes, incomplete
 Updating after 91 packets decoded
 Updating after 92 packets decoded
 At traffic row 27:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 8 of 34 requested bytes
++ Getting configuration descriptor #0 for device 4, reading 8 of 34 requested bytes, incomplete
 Updating after 93 packets decoded
 Updating after 94 packets decoded
 Updating after 95 packets decoded
 At traffic row 27:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 16 of 34 requested bytes
++ Getting configuration descriptor #0 for device 4, reading 16 of 34 requested bytes, incomplete
 Updating after 96 packets decoded
 Updating after 97 packets decoded
 At traffic row 27:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 16 of 34 requested bytes
++ Getting configuration descriptor #0 for device 4, reading 16 of 34 requested bytes, incomplete
 Updating after 98 packets decoded
 Updating after 99 packets decoded
 At traffic row 27:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 16 of 34 requested bytes
++ Getting configuration descriptor #0 for device 4, reading 16 of 34 requested bytes, incomplete
 Updating after 100 packets decoded
 Updating after 101 packets decoded
 Updating after 102 packets decoded
 At traffic row 27:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 24 of 34 requested bytes
++ Getting configuration descriptor #0 for device 4, reading 24 of 34 requested bytes, incomplete
 Updating after 103 packets decoded
 Updating after 104 packets decoded
 At traffic row 27:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 24 of 34 requested bytes
++ Getting configuration descriptor #0 for device 4, reading 24 of 34 requested bytes, incomplete
 Updating after 105 packets decoded
 Updating after 106 packets decoded
 At traffic row 27:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 24 of 34 requested bytes
++ Getting configuration descriptor #0 for device 4, reading 24 of 34 requested bytes, incomplete
 Updating after 107 packets decoded
 Updating after 108 packets decoded
 Updating after 109 packets decoded
 At traffic row 27:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 32 of 34 requested bytes
++ Getting configuration descriptor #0 for device 4, reading 32 of 34 requested bytes, incomplete
 Updating after 110 packets decoded
 Updating after 111 packets decoded
 At traffic row 27:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 32 of 34 requested bytes
++ Getting configuration descriptor #0 for device 4, reading 32 of 34 requested bytes, incomplete
 Updating after 112 packets decoded
 Updating after 113 packets decoded
 Updating after 114 packets decoded
 At traffic row 27:
 - Incomplete control transfer on device 4
-+ Getting configuration descriptor #0 for device 4, reading 34 bytes
++ Getting configuration descriptor #0 for device 4, reading 34 bytes, incomplete
 Updating after 115 packets decoded
 Updating after 116 packets decoded
 At devices row 0:
@@ -482,23 +482,23 @@ Updating after 119 packets decoded
 Updating after 120 packets decoded
 At traffic row 28:
 - Incomplete control transfer on device 4
-+ Getting string descriptor #0 for device 4, reading 0 of 255 requested bytes
++ Getting string descriptor #0 for device 4, reading 0 of 255 requested bytes, incomplete
 Updating after 121 packets decoded
 Updating after 122 packets decoded
 At traffic row 28:
 - Incomplete control transfer on device 4
-+ Getting string descriptor #0 for device 4, reading 0 of 255 requested bytes
++ Getting string descriptor #0 for device 4, reading 0 of 255 requested bytes, incomplete
 Updating after 123 packets decoded
 Updating after 124 packets decoded
 At traffic row 28:
 - Incomplete control transfer on device 4
-+ Getting string descriptor #0 for device 4, reading 0 of 255 requested bytes
++ Getting string descriptor #0 for device 4, reading 0 of 255 requested bytes, incomplete
 Updating after 125 packets decoded
 Updating after 126 packets decoded
 Updating after 127 packets decoded
 At traffic row 28:
 - Incomplete control transfer on device 4
-+ Getting string descriptor #0 for device 4, reading 4 of 255 requested bytes
++ Getting string descriptor #0 for device 4, reading 4 of 255 requested bytes, incomplete
 Updating after 128 packets decoded
 Updating after 129 packets decoded
 At devices row 0:
@@ -512,72 +512,72 @@ Updating after 132 packets decoded
 Updating after 133 packets decoded
 At traffic row 29:
 - Incomplete control transfer on device 4
-+ Getting string descriptor #2, language 0x0409 for device 4, reading 0 of 255 requested bytes
++ Getting string descriptor #2, language 0x0409 for device 4, reading 0 of 255 requested bytes, incomplete
 Updating after 134 packets decoded
 Updating after 135 packets decoded
 At traffic row 29:
 - Incomplete control transfer on device 4
-+ Getting string descriptor #2, language 0x0409 for device 4, reading 0 of 255 requested bytes
++ Getting string descriptor #2, language 0x0409 for device 4, reading 0 of 255 requested bytes, incomplete
 Updating after 136 packets decoded
 Updating after 137 packets decoded
 At traffic row 29:
 - Incomplete control transfer on device 4
-+ Getting string descriptor #2, language 0x0409 for device 4, reading 0 of 255 requested bytes
++ Getting string descriptor #2, language 0x0409 for device 4, reading 0 of 255 requested bytes, incomplete
 Updating after 138 packets decoded
 Updating after 139 packets decoded
 Updating after 140 packets decoded
 At traffic row 29:
 - Incomplete control transfer on device 4
-+ Getting string descriptor #2, language 0x0409 for device 4, reading 8 of 255 requested bytes: 'USB'
++ Getting string descriptor #2, language 0x0409 for device 4, reading 8 of 255 requested bytes: 'USB', incomplete
 Updating after 141 packets decoded
 Updating after 142 packets decoded
 Updating after 143 packets decoded
 At traffic row 29:
 - Incomplete control transfer on device 4
-+ Getting string descriptor #2, language 0x0409 for device 4, reading 16 of 255 requested bytes: 'USB Opt'
++ Getting string descriptor #2, language 0x0409 for device 4, reading 16 of 255 requested bytes: 'USB Opt', incomplete
 Updating after 144 packets decoded
 Updating after 145 packets decoded
 At traffic row 29:
 - Incomplete control transfer on device 4
-+ Getting string descriptor #2, language 0x0409 for device 4, reading 16 of 255 requested bytes: 'USB Opt'
++ Getting string descriptor #2, language 0x0409 for device 4, reading 16 of 255 requested bytes: 'USB Opt', incomplete
 Updating after 146 packets decoded
 Updating after 147 packets decoded
 At traffic row 29:
 - Incomplete control transfer on device 4
-+ Getting string descriptor #2, language 0x0409 for device 4, reading 16 of 255 requested bytes: 'USB Opt'
++ Getting string descriptor #2, language 0x0409 for device 4, reading 16 of 255 requested bytes: 'USB Opt', incomplete
 Updating after 148 packets decoded
 Updating after 149 packets decoded
 Updating after 150 packets decoded
 At traffic row 29:
 - Incomplete control transfer on device 4
-+ Getting string descriptor #2, language 0x0409 for device 4, reading 24 of 255 requested bytes: 'USB Optical'
++ Getting string descriptor #2, language 0x0409 for device 4, reading 24 of 255 requested bytes: 'USB Optical', incomplete
 Updating after 151 packets decoded
 Updating after 152 packets decoded
 At traffic row 29:
 - Incomplete control transfer on device 4
-+ Getting string descriptor #2, language 0x0409 for device 4, reading 24 of 255 requested bytes: 'USB Optical'
++ Getting string descriptor #2, language 0x0409 for device 4, reading 24 of 255 requested bytes: 'USB Optical', incomplete
 Updating after 153 packets decoded
 Updating after 154 packets decoded
 At traffic row 29:
 - Incomplete control transfer on device 4
-+ Getting string descriptor #2, language 0x0409 for device 4, reading 24 of 255 requested bytes: 'USB Optical'
++ Getting string descriptor #2, language 0x0409 for device 4, reading 24 of 255 requested bytes: 'USB Optical', incomplete
 Updating after 155 packets decoded
 Updating after 156 packets decoded
 Updating after 157 packets decoded
 At traffic row 29:
 - Incomplete control transfer on device 4
-+ Getting string descriptor #2, language 0x0409 for device 4, reading 32 of 255 requested bytes: 'USB Optical Mou'
++ Getting string descriptor #2, language 0x0409 for device 4, reading 32 of 255 requested bytes: 'USB Optical Mou', incomplete
 Updating after 158 packets decoded
 Updating after 159 packets decoded
 At traffic row 29:
 - Incomplete control transfer on device 4
-+ Getting string descriptor #2, language 0x0409 for device 4, reading 32 of 255 requested bytes: 'USB Optical Mou'
++ Getting string descriptor #2, language 0x0409 for device 4, reading 32 of 255 requested bytes: 'USB Optical Mou', incomplete
 Updating after 160 packets decoded
 Updating after 161 packets decoded
 Updating after 162 packets decoded
 At traffic row 29:
 - Incomplete control transfer on device 4
-+ Getting string descriptor #2, language 0x0409 for device 4, reading 36 of 255 requested bytes: 'USB Optical Mouse'
++ Getting string descriptor #2, language 0x0409 for device 4, reading 36 of 255 requested bytes: 'USB Optical Mouse', incomplete
 Updating after 163 packets decoded
 Updating after 164 packets decoded
 At devices row 0:

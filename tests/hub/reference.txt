@@ -22461,7 +22461,7 @@ Getting status for device 16, reading 2 bytes
   OUT packet on 16.0, CRC 1E
   DATA1 packet with CRC 0000 and no data
   ACK packet
-Class request #10, index 0, value 0 for interface 16.2
+Class request #10, index 0, value 0 for interface 16.2, stalled
  SETUP transaction on 16.0 with 8 data bytes, ACK: [21, 0A, 00, 00, 02, 00, 00, 00]
   SETUP packet on 16.0, CRC 1E
   DATA0 packet with CRC 98D7 and 8 data bytes: [21, 0A, 00, 00, 02, 00, 00, 00]
@@ -24556,7 +24556,7 @@ Getting string descriptor #2, language 0x0409 for device 19, reading 54 of 255 r
   SPLIT packet completing full speed control transaction on hub 15 port 4
   OUT packet on 19.0, CRC 16
   ACK packet
-Getting device qualifier descriptor #0 for device 19, reading 0 of 10 requested bytes
+Getting device qualifier descriptor #0 for device 19, reading 0 of 10 requested bytes, stalled
  Starting SETUP transaction on 19.0 with 8 data bytes, ACK: [80, 06, 00, 06, 00, 00, 0A, 00]
   SPLIT packet starting full speed control transaction on hub 15 port 4
   SETUP packet on 19.0, CRC 16
@@ -25750,7 +25750,7 @@ Setting interface 1 to 0 for interface 18.1
   IN packet on 18.0, CRC 09
   DATA1 packet with CRC 0000 and no data
   ACK packet
-Class request #3, index 1, value 4 for device 17, index 1
+Class request #3, index 1, value 4 for device 17, index 1, incomplete
  Starting SETUP transaction on 17.0 with 8 data bytes, ACK: [23, 03, 04, 00, 01, 00, 00, 00]
   SPLIT packet starting full speed control transaction on hub 15 port 1
   SETUP packet on 17.0, CRC 01
@@ -25993,7 +25993,7 @@ Class request #134, index 1, value 768 for interface 18.2, reading 1 bytes
   OUT packet on 18.0, CRC 09
   DATA1 packet with CRC 0000 and no data
   ACK packet
-Class request #130, index 1, value 768 for interface 18.2, reading 0 of 1 requested bytes
+Class request #130, index 1, value 768 for interface 18.2, reading 0 of 1 requested bytes, stalled
  SETUP transaction on 18.0 with 8 data bytes, ACK: [A1, 82, 00, 03, 02, 01, 01, 00]
   SETUP packet on 18.0, CRC 09
   DATA0 packet with CRC A0C3 and 8 data bytes: [A1, 82, 00, 03, 02, 01, 01, 00]
@@ -26027,7 +26027,7 @@ Class request #129, index 0, value 512 for interface 18.2, reading 1 bytes
   OUT packet on 18.0, CRC 09
   DATA1 packet with CRC 0000 and no data
   ACK packet
-Class request #131, index 1, value 768 for interface 18.2, reading 0 of 1 requested bytes
+Class request #131, index 1, value 768 for interface 18.2, reading 0 of 1 requested bytes, stalled
  SETUP transaction on 18.0 with 8 data bytes, ACK: [A1, 83, 00, 03, 02, 01, 01, 00]
   SETUP packet on 18.0, CRC 09
   DATA0 packet with CRC 60D3 and 8 data bytes: [A1, 83, 00, 03, 02, 01, 01, 00]
@@ -26061,7 +26061,7 @@ Class request #129, index 0, value 512 for interface 18.2, reading 1 bytes
   OUT packet on 18.0, CRC 09
   DATA1 packet with CRC 0000 and no data
   ACK packet
-Class request #132, index 1, value 768 for interface 18.2, reading 0 of 1 requested bytes
+Class request #132, index 1, value 768 for interface 18.2, reading 0 of 1 requested bytes, stalled
  SETUP transaction on 18.0 with 8 data bytes, ACK: [A1, 84, 00, 03, 02, 01, 01, 00]
   SETUP packet on 18.0, CRC 09
   DATA0 packet with CRC A0A5 and 8 data bytes: [A1, 84, 00, 03, 02, 01, 01, 00]
@@ -26095,7 +26095,7 @@ Class request #129, index 0, value 512 for interface 18.2, reading 1 bytes
   OUT packet on 18.0, CRC 09
   DATA1 packet with CRC 0000 and no data
   ACK packet
-Class request #135, index 1, value 768 for interface 18.2, reading 0 of 1 requested bytes
+Class request #135, index 1, value 768 for interface 18.2, reading 0 of 1 requested bytes, stalled
  SETUP transaction on 18.0 with 8 data bytes, ACK: [A1, 87, 00, 03, 02, 01, 01, 00]
   SETUP packet on 18.0, CRC 09
   DATA0 packet with CRC A096 and 8 data bytes: [A1, 87, 00, 03, 02, 01, 01, 00]
@@ -26129,7 +26129,7 @@ Class request #129, index 0, value 512 for interface 18.2, reading 1 bytes
   OUT packet on 18.0, CRC 09
   DATA1 packet with CRC 0000 and no data
   ACK packet
-Class request #134, index 1, value 2304 for interface 18.2, reading 0 of 1 requested bytes
+Class request #134, index 1, value 2304 for interface 18.2, reading 0 of 1 requested bytes, stalled
  SETUP transaction on 18.0 with 8 data bytes, ACK: [A1, 86, 00, 09, 02, 01, 01, 00]
   SETUP packet on 18.0, CRC 09
   DATA0 packet with CRC 611E and 8 data bytes: [A1, 86, 00, 09, 02, 01, 01, 00]
@@ -29268,7 +29268,7 @@ Class request #134, index 6, value 1536 for interface 18.2, reading 1 bytes
   OUT packet on 18.0, CRC 09
   DATA1 packet with CRC 0000 and no data
   ACK packet
-Class request #130, index 6, value 1536 for interface 18.2, reading 0 of 2 requested bytes
+Class request #130, index 6, value 1536 for interface 18.2, reading 0 of 2 requested bytes, incomplete
  SETUP transaction on 18.0 with 8 data bytes, ACK: [A1, 82, 00, 06, 02, 06, 02, 00]
   SETUP packet on 18.0, CRC 09
   DATA0 packet with CRC 91BE and 8 data bytes: [A1, 82, 00, 06, 02, 06, 02, 00]

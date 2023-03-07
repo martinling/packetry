@@ -5,7 +5,7 @@ At traffic row 0:
 + Getting device descriptor #0 for device 0, reading 18 of 64 requested bytes
 + Setting address to 1 for device 0
 + Getting device descriptor #0 for device 1, reading 18 bytes
-+ 3 times: Getting device qualifier descriptor #0 for device 1, reading 0 of 10 requested bytes
++ 3 times: Getting device qualifier descriptor #0 for device 1, reading 0 of 10 requested bytes, stalled
 + Getting configuration descriptor #0 for device 1, reading 9 bytes
 + Getting configuration descriptor #0 for device 1, reading 98 bytes
 + Getting string descriptor #0 for device 1, reading 4 of 255 requested bytes
@@ -17,7 +17,7 @@ At traffic row 0:
 + Getting device descriptor #0 for device 0, reading 18 of 64 requested bytes
 + Setting address to 2 for device 0
 + Getting device descriptor #0 for device 2, reading 18 bytes
-+ 3 times: Getting device qualifier descriptor #0 for device 2, reading 0 of 10 requested bytes
++ 3 times: Getting device qualifier descriptor #0 for device 2, reading 0 of 10 requested bytes, stalled
 + Getting configuration descriptor #0 for device 2, reading 9 bytes
 + Getting configuration descriptor #0 for device 2, reading 100 bytes
 + Getting string descriptor #0 for device 2, reading 4 of 255 requested bytes
@@ -261,7 +261,7 @@ At traffic row 0:
 - Getting device descriptor #0 for device 0, reading 18 of 64 requested bytes
 - Setting address to 1 for device 0
 - Getting device descriptor #0 for device 1, reading 18 bytes
-- 3 times: Getting device qualifier descriptor #0 for device 1, reading 0 of 10 requested bytes
+- 3 times: Getting device qualifier descriptor #0 for device 1, reading 0 of 10 requested bytes, stalled
 - Getting configuration descriptor #0 for device 1, reading 9 bytes
 - Getting configuration descriptor #0 for device 1, reading 98 bytes
 - Getting string descriptor #0 for device 1, reading 4 of 255 requested bytes
@@ -273,7 +273,7 @@ At traffic row 0:
 - Getting device descriptor #0 for device 0, reading 18 of 64 requested bytes
 - Setting address to 2 for device 0
 - Getting device descriptor #0 for device 2, reading 18 bytes
-- 3 times: Getting device qualifier descriptor #0 for device 2, reading 0 of 10 requested bytes
+- 3 times: Getting device qualifier descriptor #0 for device 2, reading 0 of 10 requested bytes, stalled
 - Getting configuration descriptor #0 for device 2, reading 9 bytes
 - Getting configuration descriptor #0 for device 2, reading 100 bytes
 - Getting string descriptor #0 for device 2, reading 4 of 255 requested bytes
@@ -293,7 +293,7 @@ At traffic row 0:
 + Getting device descriptor #0 for device 0, reading 18 of 64 requested bytes
 + Setting address to 1 for device 0
 + Getting device descriptor #0 for device 1, reading 18 bytes
-+ 3 times: Getting device qualifier descriptor #0 for device 1, reading 0 of 10 requested bytes
++ 3 times: Getting device qualifier descriptor #0 for device 1, reading 0 of 10 requested bytes, stalled
 + Getting configuration descriptor #0 for device 1, reading 9 bytes
 + Getting configuration descriptor #0 for device 1, reading 98 bytes
 + Getting string descriptor #0 for device 1, reading 4 of 255 requested bytes
@@ -305,7 +305,7 @@ At traffic row 0:
 + Getting device descriptor #0 for device 0, reading 18 of 64 requested bytes
 + Setting address to 2 for device 0
 + Getting device descriptor #0 for device 2, reading 18 bytes
-+ 3 times: Getting device qualifier descriptor #0 for device 2, reading 0 of 10 requested bytes
++ 3 times: Getting device qualifier descriptor #0 for device 2, reading 0 of 10 requested bytes, stalled
 + Getting configuration descriptor #0 for device 2, reading 9 bytes
 + Getting configuration descriptor #0 for device 2, reading 100 bytes
 + Getting string descriptor #0 for device 2, reading 4 of 255 requested bytes
