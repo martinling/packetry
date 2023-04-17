@@ -4,6 +4,7 @@ use std::sync::Arc;
 use anyhow::{Context, Error, bail};
 
 use crate::capture::prelude::*;
+use crate::capture::MUTEX;
 use crate::rcu::SingleWriterRcu;
 use crate::usb::{self, prelude::*};
 use crate::vec_map::{VecMap, Key};
@@ -583,10 +584,12 @@ impl Decoder {
     pub fn handle_raw_packet(&mut self, packet: &[u8], timestamp_ns: u64)
         -> Result<(), Error>
     {
+        let lock = MUTEX.lock();
         let data_range = self.capture.packet_data.append(packet)?;
         let packet_id = self.capture.packet_index.push(data_range.start)?;
         self.capture.packet_times.push(timestamp_ns)?;
         self.transaction_update(packet_id, packet)?;
+        drop(lock);
         Ok(())
     }
 

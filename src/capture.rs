@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
 use std::sync::atomic::Ordering::{Acquire, Release};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::mem::size_of;
 
 use crate::id::{Id, HasLength};
@@ -22,6 +22,8 @@ use num_enum::{IntoPrimitive, FromPrimitive};
 
 // Use 2MB block size for packet data, which is a large page size on x86_64.
 const PACKET_DATA_BLOCK_SIZE: usize = 0x200000;
+
+pub static MUTEX: Mutex<()> = Mutex::new(());
 
 /// Capture state shared between readers and writers.
 pub struct CaptureShared {
