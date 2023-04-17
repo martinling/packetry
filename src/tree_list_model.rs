@@ -22,6 +22,7 @@ use crate::capture::{
     CompletionStatus,
     ItemSource,
     SearchResult,
+    MUTEX,
 };
 use crate::model::GenericModel;
 use crate::row_data::GenericRowData;
@@ -1693,9 +1694,11 @@ where Item: 'static + Copy + Debug,
     }
 
     pub fn update(&self, model: &Model) -> Result<bool, ModelError> {
+        let lock = MUTEX.lock();
         #[cfg(feature="debug-region-map")]
         let rows_before = self.row_count();
         self.update_node(&self.root, 0, model)?;
+        drop(lock);
         #[cfg(feature="debug-region-map")] {
             let rows_after = self.row_count();
             let rows_added = rows_after - rows_before;
