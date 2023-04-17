@@ -635,7 +635,7 @@ where Item: 'static + Copy + Debug,
         self.check()?;
 
         // Update model.
-        self.apply_update(model, children_position, update);
+        self.apply_update(model, children_position, update)?;
 
         Ok(())
     }
@@ -2084,7 +2084,7 @@ where Item: 'static + Copy + Debug,
                     rows_added: top_level_added + second_level_added,
                     rows_removed: 0,
                     rows_changed: 0
-                });
+                })?;
             }
         } else if children_added > 0 {
             // This is an item node. Update child counts.
@@ -2130,7 +2130,7 @@ where Item: 'static + Copy + Debug,
                     rows_added: children_added,
                     rows_removed: 0,
                     rows_changed: 0
-                });
+                })?;
 
                 // Update the position to continue from.
                 position += children_added;
@@ -2256,7 +2256,16 @@ where Item: 'static + Copy + Debug,
     }
 
     fn apply_update(&self, model: &Model, position: u64, update: ModelUpdate)
+        -> Result<(), ModelError>
     {
+        let row_count = self.row_count();
+        let rows_required =
+            position + update.rows_removed + update.rows_changed;
+        if rows_required > row_count {
+            return Err(InternalError(format!("
+                Invalid update: {} at row {}, but only {} rows in model",
+                update, position, row_count)))
+        }
         if let Ok(position) = u32::try_from(position) {
             let rows_addressable = u32::MAX - position;
             let rows_removed = clamp(
@@ -2267,6 +2276,7 @@ where Item: 'static + Copy + Debug,
                 rows_addressable);
             model.items_changed(position, rows_removed, rows_added);
         }
+        Ok(())
     }
 
     // The following methods correspond to the ListModel interface, and can be
