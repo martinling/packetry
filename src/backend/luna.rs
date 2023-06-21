@@ -15,8 +15,8 @@ use rusb::{
 const VID: u16 = 0x1d50;
 const PID: u16 = 0x615b;
 
-const MIN_SUPPORTED: Version = Version(0, 0, 2);
-const NOT_SUPPORTED: Version = Version(0, 0, 3);
+const MIN_SUPPORTED: Version = Version(0, 0, 3);
+const NOT_SUPPORTED: Version = Version(0, 0, 4);
 
 const ENDPOINT: u8 = 0x81;
 
@@ -82,6 +82,8 @@ pub enum Error {
              Supported range is {MIN_SUPPORTED} or higher, \
              but not {NOT_SUPPORTED} or higher")]
     WrongVersion(Version),
+    #[error("analyzer buffer overrun")]
+    Overrun,
 }
 
 /// A Luna device attached to the system.
@@ -190,8 +192,8 @@ impl LunaHandle {
                 match result {
                     Ok(count) => {
                         packet_queue.extend(&buffer[..count]);
-                        while let Some(packet) = packet_queue.next() {
-                            tx.send(Ok(packet))
+                        while let Some(result) = packet_queue.next() {
+                            tx.send(result)
                                 .or(Err(Error::ChannelSend))?;
                         };
                     },
@@ -263,18 +265,22 @@ impl PacketQueue {
         self.buffer.extend(slice.iter());
     }
 
-    pub fn next(&mut self) -> Option<Vec<u8>> {
+    pub fn next(&mut self) -> Option<Result<Vec<u8>, Error>> {
         let buffer_len = self.buffer.len();
         if buffer_len <= 2 {
             return None;
         }
         let packet_len = u16::from_be_bytes([self.buffer[0], self.buffer[1]]) as usize;
+        if packet_len == 0xFFFF {
+            println!("Overrun!");
+            return Some(Err(Error::Overrun));
+        }
         if buffer_len <= 2 + packet_len {
             return None;
         }
 
         self.buffer.drain(0..2);
 
-        Some(self.buffer.drain(0..packet_len).collect())
+        Some(Ok(self.buffer.drain(0..packet_len).collect()))
     }
 }
