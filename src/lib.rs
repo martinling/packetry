@@ -9,6 +9,7 @@ pub mod decoder;
 mod expander;
 mod id;
 mod index_stream;
+pub mod loader;
 pub mod model;
 mod rcu;
 pub mod row_data;
