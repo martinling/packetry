@@ -868,7 +868,7 @@ pub fn start_cynthion() -> Result<(), Error> {
         let read_cynthion = move || {
             let mut decoder = Decoder::new(writer)?;
             for packet in stream_handle {
-                decoder.handle_raw_packet(&packet)?;
+                decoder.handle_raw_packet(&packet.bytes)?;
             }
             decoder.finish()?;
             Ok(())
