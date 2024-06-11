@@ -142,6 +142,7 @@ pub struct CynthionStream {
     receiver: mpsc::Receiver<Vec<u8>>,
     buffer: VecDeque<u8>,
     padding_due: bool,
+    total_clk_cycles: u64,
 }
 
 pub struct CynthionStop {
@@ -150,8 +151,16 @@ pub struct CynthionStop {
 }
 
 pub struct CynthionPacket {
-    pub clk_cycles: u16,
+    pub timestamp_ns: u64,
     pub bytes: Vec<u8>,
+}
+
+/// Convert 60MHz clock cycles to nanoseconds, rounding down.
+fn clk_to_ns(clk_cycles: u64) -> u64 {
+    const TABLE: [u64; 3] = [0, 16, 33];
+    let quotient = clk_cycles / 3;
+    let remainder = clk_cycles % 3;
+    return quotient * 50 + TABLE[remainder as usize];
 }
 
 /// Check whether a Cynthion device has an accessible analyzer interface.
@@ -304,6 +313,7 @@ impl CynthionHandle {
                 receiver: rx,
                 buffer: VecDeque::new(),
                 padding_due: false,
+                total_clk_cycles: 0,
             },
             CynthionStop {
                 stop_request: stop_tx,
@@ -482,6 +492,9 @@ impl CynthionStream {
                 // This is an event.
                 let _event_code = self.buffer[1];
 
+                // Update our cycle count.
+                self.update_cycle_count();
+
                 // Remove event from buffer.
                 self.buffer.drain(0..4);
             } else {
@@ -497,9 +510,8 @@ impl CynthionStream {
             return None;
         }
 
-        // Decode the timestamp field.
-        let clk_cycles = u16::from_be_bytes(
-            [self.buffer[2], self.buffer[3]]);
+        // Update our cycle count.
+        self.update_cycle_count();
 
         // Remove the length and timestamp from the buffer.
         self.buffer.drain(0..4);
@@ -511,9 +523,18 @@ impl CynthionStream {
 
         // Remove the rest of the packet from the buffer and return it.
         Some(CynthionPacket {
-            clk_cycles,
+            timestamp_ns: clk_to_ns(self.total_clk_cycles),
             bytes: self.buffer.drain(0..packet_len).collect()
         })
+    }
+
+    fn update_cycle_count(&mut self) {
+        // Decode the cycle count.
+        let clk_cycles = u16::from_be_bytes(
+            [self.buffer[2], self.buffer[3]]);
+
+        // Update our running total.
+        self.total_clk_cycles += clk_cycles as u64;
     }
 }
 
