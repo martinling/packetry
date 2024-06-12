@@ -1,3 +1,25 @@
+#[macro_use]
+extern crate bitfield;
+
+mod backend;
+mod capture;
+mod compact_index;
+mod data_stream;
+mod decoder;
+mod expander;
+mod id;
+mod index_stream;
+mod model;
+mod rcu;
+mod row_data;
+mod record_ui;
+mod stream;
+mod tree_list_model;
+mod ui;
+mod usb;
+mod util;
+mod vec_map;
+
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -8,11 +30,11 @@ use itertools::assert_equal;
 use pcap_file::pcap::PcapReader;
 use serde_json::Deserializer;
 
-use packetry::decoder::Decoder;
-use packetry::model::GenericModel;
-use packetry::row_data::{GenericRowData, TrafficRowData, DeviceRowData};
-use packetry::record_ui::UiAction;
-use packetry::ui::{
+use decoder::Decoder;
+use model::GenericModel;
+use row_data::{GenericRowData, TrafficRowData, DeviceRowData};
+use record_ui::UiAction;
+use ui::{
     UserInterface,
     activate,
     reset_capture,
