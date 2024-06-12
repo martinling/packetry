@@ -1,7 +1,7 @@
 use gtk::prelude::*;
 use gtk::gio::ApplicationFlags;
 
-use packetry::ui::{
+use packetry::internal::ui::{
     activate,
     display_error,
     stop_cynthion

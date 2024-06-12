@@ -8,9 +8,11 @@ use gtk::gio::prelude::ListModelExt;
 use itertools::Itertools;
 use serde::{Serialize, Deserialize};
 
-use crate::capture::{CaptureReader, ItemSource};
-use crate::model::GenericModel;
-use crate::row_data::ToGenericRowData;
+use crate::internal::{
+    capture::{CaptureReader, ItemSource},
+    model::GenericModel,
+    row_data::ToGenericRowData,
+};
 
 #[derive(Serialize, Deserialize)]
 pub enum UiAction {

@@ -10,8 +10,10 @@ use gtk::glib;
 use gtk::prelude::Cast;
 use gtk::subclass::prelude::*;
 
-use crate::capture::{TrafficItem, DeviceItem};
-use crate::tree_list_model::ItemNodeRc;
+use crate::internal::{
+    capture::{TrafficItem, DeviceItem},
+    tree_list_model::ItemNodeRc,
+};
 
 // Public part of the RowData type. This behaves like a normal gtk-rs-style GObject
 // binding

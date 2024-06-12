@@ -5,7 +5,7 @@ use bytemuck::pod_read_unaligned;
 use num_enum::{IntoPrimitive, FromPrimitive};
 use derive_more::{From, Into, Display};
 
-use crate::vec_map::VecMap;
+use crate::internal::vec_map::VecMap;
 
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Copy, Clone, Debug, Default, IntoPrimitive, FromPrimitive, PartialEq, Eq)]

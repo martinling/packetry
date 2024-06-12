@@ -8,16 +8,18 @@ use itertools::assert_equal;
 use pcap_file::pcap::PcapReader;
 use serde_json::Deserializer;
 
-use packetry::decoder::Decoder;
-use packetry::model::GenericModel;
-use packetry::row_data::{GenericRowData, TrafficRowData, DeviceRowData};
-use packetry::record_ui::UiAction;
-use packetry::ui::{
-    UserInterface,
-    activate,
-    reset_capture,
-    update_view,
-    with_ui,
+use packetry::internal::{
+    decoder::Decoder,
+    model::GenericModel,
+    row_data::{GenericRowData, TrafficRowData, DeviceRowData},
+    record_ui::UiAction,
+    ui::{
+        UserInterface,
+        activate,
+        reset_capture,
+        update_view,
+        with_ui,
+    },
 };
 
 fn main() {

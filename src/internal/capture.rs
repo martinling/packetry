@@ -6,14 +6,15 @@ use std::sync::atomic::Ordering::{Acquire, Release};
 use std::sync::Arc;
 use std::mem::size_of;
 
-use crate::id::{Id, HasLength};
-use crate::data_stream::{
-    data_stream, data_stream_with_block_size, DataWriter, DataReader};
-use crate::compact_index::{compact_index, CompactWriter, CompactReader};
-use crate::rcu::SingleWriterRcu;
-use crate::vec_map::VecMap;
-use crate::usb::{self, prelude::*};
-use crate::util::{fmt_count, fmt_size};
+use crate::internal::{
+    id::{Id, HasLength},
+    data_stream::{data_stream, data_stream_with_block_size, DataWriter, DataReader},
+    compact_index::{compact_index, CompactWriter, CompactReader},
+    rcu::SingleWriterRcu,
+    vec_map::VecMap,
+    usb::{self, prelude::*},
+    util::{fmt_count, fmt_size},
+};
 
 use anyhow::{Context, Error, bail};
 use arc_swap::{ArcSwap, ArcSwapOption};
@@ -1588,7 +1589,7 @@ mod tests {
     use std::fs::File;
     use std::io::{BufReader, BufWriter, BufRead, Write};
     use std::path::PathBuf;
-    use crate::decoder::Decoder;
+    use crate::internal::decoder::Decoder;
     use itertools::Itertools;
     use pcap_file::pcap::PcapReader;
 

@@ -15,10 +15,12 @@ use gtk::gio::prelude::ListModelExt;
 use derive_more::AddAssign;
 use itertools::Itertools;
 
-use crate::capture::{CaptureReader, ItemSource};
-use crate::model::GenericModel;
-use crate::row_data::GenericRowData;
-use crate::expander::ExpanderWrapper;
+use crate::internal::{
+    capture::{CaptureReader, ItemSource},
+    model::GenericModel,
+    row_data::GenericRowData,
+    expander::ExpanderWrapper,
+};
 
 type RootNodeRc<Item> = Rc<RefCell<RootNode<Item>>>;
 pub type ItemNodeRc<Item> = Rc<RefCell<ItemNode<Item>>>;

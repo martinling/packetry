@@ -47,36 +47,39 @@ use pcap_file::{
     pcap::{PcapReader, PcapWriter, PcapHeader, RawPcapPacket},
 };
 
-use crate::backend::cynthion::{
-    CynthionDevice,
-    CynthionHandle,
-    CynthionStop,
-    CynthionUsability::*,
-    Speed};
-
-use crate::capture::{
-    create_capture,
-    CaptureReader,
-    CaptureWriter,
-    ItemSource,
-    TrafficItem,
-    DeviceItem,
-    PacketId,
+use crate::internal::{
+    backend::cynthion::{
+        CynthionDevice,
+        CynthionHandle,
+        CynthionStop,
+        CynthionUsability::*,
+        Speed,
+    },
+    capture::{
+        create_capture,
+        CaptureReader,
+        CaptureWriter,
+        ItemSource,
+        TrafficItem,
+        DeviceItem,
+        PacketId,
+    },
+    decoder::Decoder,
+    expander::ExpanderWrapper,
+    model::{GenericModel, TrafficModel, DeviceModel},
+    row_data::{
+        GenericRowData,
+        ToGenericRowData,
+        TrafficRowData,
+        DeviceRowData
+    },
+    util::{fmt_count, fmt_size},
 };
-use crate::decoder::Decoder;
-use crate::expander::ExpanderWrapper;
-use crate::model::{GenericModel, TrafficModel, DeviceModel};
-use crate::row_data::{
-    GenericRowData,
-    ToGenericRowData,
-    TrafficRowData,
-    DeviceRowData};
-use crate::util::{fmt_count, fmt_size};
 
 #[cfg(any(feature="test-ui-replay", feature="record-ui-test"))]
 use {
     std::rc::Rc,
-    crate::record_ui::Recording,
+    crate::internal::record_ui::Recording,
 };
 
 static TOTAL: AtomicU64 = AtomicU64::new(0);

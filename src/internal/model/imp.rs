@@ -4,9 +4,11 @@ use gio::subclass::prelude::*;
 use gtk::{gio, glib, prelude::*};
 
 use std::cell::RefCell;
-use crate::capture::{TrafficItem, DeviceItem};
-use crate::row_data::{TrafficRowData, DeviceRowData};
-use crate::tree_list_model::TreeListModel;
+use crate::internal::{
+    capture::{TrafficItem, DeviceItem},
+    row_data::{TrafficRowData, DeviceRowData},
+    tree_list_model::TreeListModel,
+};
 
 #[derive(Default)]
 pub struct TrafficModel {

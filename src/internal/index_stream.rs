@@ -5,10 +5,12 @@ use std::ops::Range;
 use anyhow::Error;
 use bisection::{bisect_left, bisect_right};
 
-use crate::data_stream::{data_stream, DataReader, DataWriter};
-use crate::id::Id;
-use crate::stream::MIN_BLOCK;
-use crate::util::{fmt_count, fmt_size};
+use crate::internal::{
+    data_stream::{data_stream, DataReader, DataWriter},
+    id::Id,
+    stream::MIN_BLOCK,
+    util::{fmt_count, fmt_size},
+};
 
 /// Unique handle for append-only write access to an index.
 pub struct IndexWriter<Position, Value, const S: usize = MIN_BLOCK> {

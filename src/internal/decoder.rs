@@ -3,10 +3,12 @@ use std::sync::Arc;
 
 use anyhow::{Context, Error, bail};
 
-use crate::capture::prelude::*;
-use crate::rcu::SingleWriterRcu;
-use crate::usb::{self, prelude::*};
-use crate::vec_map::{VecMap, Key};
+use crate::internal::{
+    capture::prelude::*,
+    rcu::SingleWriterRcu,
+    usb::{self, prelude::*},
+    vec_map::{VecMap, Key},
+};
 
 impl PID {
     fn from_packet(packet: &[u8]) -> Result<PID, Error> {

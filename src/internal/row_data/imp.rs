@@ -1,8 +1,10 @@
 use gtk::glib::{self, subclass::prelude::*};
 use std::cell::RefCell;
 
-use crate::capture::{TrafficItem, DeviceItem};
-use crate::tree_list_model::ItemNodeRc;
+use crate::internal::{
+    capture::{TrafficItem, DeviceItem},
+    tree_list_model::ItemNodeRc,
+};
 
 // The actual data structure that stores our values. This is not accessible
 // directly from the outside.

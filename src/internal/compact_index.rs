@@ -10,10 +10,12 @@ use anyhow::{Error, bail};
 use bisection::bisect_left;
 use itertools::multizip;
 
-use crate::data_stream::{data_stream, DataReader, DataWriter};
-use crate::id::Id;
-use crate::index_stream::{index_stream, IndexReader, IndexWriter};
-use crate::util::{fmt_count, fmt_size};
+use crate::internal::{
+    data_stream::{data_stream, DataReader, DataWriter},
+    id::Id,
+    index_stream::{index_stream, IndexReader, IndexWriter},
+    util::{fmt_count, fmt_size},
+};
 
 type Offset = Id<u8>;
 type SegmentId = Id<u8>;

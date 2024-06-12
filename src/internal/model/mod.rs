@@ -13,8 +13,10 @@ use gtk::{gio, glib};
 
 use anyhow::Error;
 
-use crate::capture::{CaptureReader, TrafficItem, DeviceItem};
-use crate::tree_list_model::{TreeListModel, ItemNodeRc};
+use crate::internal::{
+    capture::{CaptureReader, TrafficItem, DeviceItem},
+    tree_list_model::{TreeListModel, ItemNodeRc},
+};
 
 // Public part of the Model type.
 glib::wrapper! {
