@@ -17,23 +17,30 @@ use std::thread::sleep;
 use std::time::Duration;
 
 fn main() {
-    for (speed, ep_addr, length, sof) in [
+    let speeds = [
         (Speed::High, 0x81, 4096, Some((124500,  125500, 0))),
         (Speed::Full, 0x82,  512, Some((995000, 1005000, 0))),
-        (Speed::Low,  0x83,   64, None)]
-    {
-        test(speed, ep_addr, length, sof).unwrap();
+        (Speed::Low,  0x83,   64, None)];
+
+    for (speed, ep_addr, length, sof) in speeds {
+        test(speed, speed, ep_addr, length, sof).unwrap();
+    }
+
+    for (speed, ep_addr, length, sof) in speeds {
+        test(Speed::Auto, speed, ep_addr, length, sof).unwrap();
     }
 }
 
-fn test(speed: Speed,
+fn test(analyzer_speed: Speed,
+        test_speed: Speed,
         ep_addr: u8,
         length: usize,
         sof: Option<(u64, u64, u64)>)
     -> Result<(), Error>
 {
-    let desc = speed.description();
-    println!("\nTesting at {desc}:\n");
+    println!("\nTesting with Analyzer: {}, Test device: {}:\n",
+             analyzer_speed.description(),
+             test_speed.description());
 
     // Create capture and decoder.
     let (writer, mut reader) = create_capture()
@@ -58,13 +65,13 @@ fn test(speed: Speed,
 
     // Start capture.
     let (packets, stop_handle) = analyzer
-        .start(speed,
+        .start(analyzer_speed,
                |err| err.context("Failure in capture thread").unwrap())
         .context("Failed to start analyzer")?;
 
     // Tell analyzer to connect test device, then wait for it to enumerate.
     println!("Enabling test device");
-    analyzer.configure_test_device(Some(speed))?;
+    analyzer.configure_test_device(Some(test_speed))?;
     sleep(Duration::from_millis(2000));
 
     // Open test device on AUX port.
