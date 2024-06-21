@@ -1,4 +1,9 @@
-use packetry::backend::cynthion::{CynthionDevice, CynthionUsability, Speed};
+use packetry::backend::cynthion::{
+    CynthionDevice,
+    CynthionPayload::*,
+    CynthionUsability,
+    Speed
+};
 use packetry::capture::{
     create_capture,
     CaptureReader,
@@ -64,7 +69,7 @@ fn test(analyzer_speed: Speed,
     sleep(Duration::from_millis(100));
 
     // Start capture.
-    let (packets, stop_handle) = analyzer
+    let (items, stop_handle) = analyzer
         .start(analyzer_speed,
                |err| err.context("Failure in capture thread").unwrap())
         .context("Failed to start analyzer")?;
@@ -97,10 +102,14 @@ fn test(analyzer_speed: Speed,
     stop_handle.stop()
         .context("Failed to stop analyzer")?;
 
-    // Decode all packets that were received.
-    for packet in packets {
-        decoder.handle_raw_packet(&packet.bytes, packet.timestamp_ns)
-            .context("Error decoding packet")?;
+    // Decode all items that were received.
+    for item in items {
+        match item.payload {
+            Packet(bytes) => decoder
+                .handle_raw_packet(&bytes, item.timestamp_ns)
+                .context("Error decoding packet")?,
+            Event(_event) => {},
+        }
     }
 
     // Look for the test device in the capture.

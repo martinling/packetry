@@ -50,6 +50,7 @@ use pcap_file::{
 use crate::backend::cynthion::{
     CynthionDevice,
     CynthionHandle,
+    CynthionPayload::*,
     CynthionStop,
     CynthionUsability::*,
     Speed};
@@ -904,8 +905,12 @@ pub fn start_cynthion() -> Result<(), Error> {
             display_error(stop_cynthion()));
         let read_cynthion = move || {
             let mut decoder = Decoder::new(writer)?;
-            for packet in stream_handle {
-                decoder.handle_raw_packet(&packet.bytes, packet.timestamp_ns)?;
+            for item in stream_handle {
+                match item.payload {
+                    Packet(bytes) =>
+                        decoder.handle_raw_packet(&bytes, item.timestamp_ns)?,
+                    Event(_event) => {}
+                };
             }
             decoder.finish()?;
             Ok(())
