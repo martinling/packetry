@@ -1,4 +1,9 @@
-use crate::backend::cynthion::{CynthionDevice, CynthionUsability, Speed};
+use crate::backend::cynthion::{
+    CynthionDevice,
+    CynthionPayload::*,
+    CynthionUsability,
+    Speed
+};
 use crate::capture::{
     create_capture,
     CaptureReader,
@@ -61,7 +66,7 @@ fn test(save_capture: bool,
     sleep(Duration::from_millis(100));
 
     // Start capture.
-    let (packets, stop_handle) = analyzer
+    let (items, stop_handle) = analyzer
         .start(speed,
                |err| err.context("Failure in capture thread").unwrap())
         .context("Failed to start analyzer")?;
@@ -94,10 +99,14 @@ fn test(save_capture: bool,
     stop_handle.stop()
         .context("Failed to stop analyzer")?;
 
-    // Decode all packets that were received.
-    for packet in packets {
-        decoder.handle_raw_packet(&packet.bytes, packet.timestamp_ns)
-            .context("Error decoding packet")?;
+    // Decode all items that were received.
+    for item in items {
+        match item.payload {
+            Packet(bytes) => decoder
+                .handle_raw_packet(&bytes, item.timestamp_ns)
+                .context("Error decoding packet")?,
+            Event(_event) => {},
+        }
     }
 
     if save_capture {

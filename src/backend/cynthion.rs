@@ -151,9 +151,39 @@ pub struct CynthionStop {
     worker: JoinHandle::<()>,
 }
 
-pub struct CynthionPacket {
+#[repr(u8)]
+#[derive(Copy, Clone, FromPrimitive, IntoPrimitive)]
+pub enum CynthionEvent {
+    NoEvent = 0,
+    CaptureStop = 1,
+    CaptureFull = 2,
+    CaptureResume = 3,
+    CaptureStartHigh = 4,
+    CaptureStartFull = 5,
+    CaptureStartLow = 6,
+    CaptureStartAuto = 7,
+    SpeedDetectHigh = 8,
+    SpeedDetectFull = 9,
+    SpeedDetectLow = 10,
+    VbusConnected = 12,
+    VbusDisconnected = 13,
+    BusReset = 14,
+    SuspendStarted = 15,
+    SuspendEnded = 16,
+    DeviceChirpSeen = 17,
+    HostChirpSeen = 18,
+    #[default]
+    Invalid = 0xFF,
+}
+
+pub enum CynthionPayload {
+    Packet(Vec<u8>),
+    Event(CynthionEvent),
+}
+
+pub struct CynthionItem {
     pub timestamp_ns: u64,
-    pub bytes: Vec<u8>,
+    pub payload: CynthionPayload,
 }
 
 /// Convert 60MHz clock cycles to nanoseconds, rounding down.
@@ -460,19 +490,19 @@ impl CynthionQueue {
 }
 
 impl Iterator for CynthionStream {
-    type Item = CynthionPacket;
+    type Item = CynthionItem;
 
-    fn next(&mut self) -> Option<CynthionPacket> {
+    fn next(&mut self) -> Option<CynthionItem> {
         loop {
-            // Do we have another packet already in the buffer?
-            match self.next_buffered_packet() {
-                // Yes; return the packet.
+            // Do we have another item already in the buffer?
+            match self.next_buffered_item() {
+                // Yes; return the item.
                 Some(packet) => return Some(packet),
                 // No; wait for more data from the capture thread.
                 None => match self.receiver.recv().ok() {
                     // Received more data; add it to the buffer and retry.
                     Some(bytes) => self.buffer.extend(bytes.iter()),
-                    // Capture has ended, there are no more packets.
+                    // Capture has ended, there are no more items.
                     None => return None
                 }
             }
@@ -481,7 +511,7 @@ impl Iterator for CynthionStream {
 }
 
 impl CynthionStream {
-    fn next_buffered_packet(&mut self) -> Option<CynthionPacket> {
+    fn next_buffered_item(&mut self) -> Option<CynthionItem> {
         // Are we waiting for a padding byte?
         if self.padding_due {
             if self.buffer.is_empty() {
@@ -492,7 +522,6 @@ impl CynthionStream {
             }
         }
 
-        // Loop over any non-packet events, until we get to a packet.
         loop {
             // Do we have the length and timestamp for the next packet/event?
             if self.buffer.len() < 4 {
@@ -501,20 +530,29 @@ impl CynthionStream {
 
             if self.buffer[0] == 0xFF {
                 // This is an event.
-                let _event_code = self.buffer[1];
+                let event_code = self.buffer[1];
+                let event = CynthionEvent::from(event_code);
 
                 // Update our cycle count.
                 self.update_cycle_count();
 
                 // Remove event from buffer.
                 self.buffer.drain(0..4);
+
+                // Return event, unless it's just a timestamp rollover.
+                if !matches!(event, CynthionEvent::NoEvent) {
+                    return Some(CynthionItem {
+                        timestamp_ns: clk_to_ns(self.total_clk_cycles),
+                        payload: CynthionPayload::Event(event)
+                    });
+                }
             } else {
-                // This is a packet, handle it below.
+                // This is a packet. Process it below.
                 break;
             }
         }
 
-        // Do we have all the data for the next packet?
+        // This is a packet. Do we have all the data for it?
         let packet_len = u16::from_be_bytes(
             [self.buffer[0], self.buffer[1]]) as usize;
         if self.buffer.len() <= 4 + packet_len {
@@ -527,15 +565,18 @@ impl CynthionStream {
         // Remove the length and timestamp from the buffer.
         self.buffer.drain(0..4);
 
+        // Remove the packet bytes from the buffer.
+        let bytes = self.buffer.drain(0..packet_len).collect();
+
         // If packet length is odd, we will need to skip a padding byte after.
         if packet_len % 2 == 1 {
             self.padding_due = true;
         }
 
         // Remove the rest of the packet from the buffer and return it.
-        Some(CynthionPacket {
+        Some(CynthionItem {
             timestamp_ns: clk_to_ns(self.total_clk_cycles),
-            bytes: self.buffer.drain(0..packet_len).collect()
+            payload: CynthionPayload::Packet(bytes),
         })
     }
 
