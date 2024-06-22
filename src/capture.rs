@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::mem::size_of;
 
 use crate::id::{Id, HasLength};
+pub use crate::backend::cynthion::CynthionEvent;
 use crate::data_stream::{
     data_stream, data_stream_with_block_size, DataWriter, DataReader};
 use crate::compact_index::{compact_index, CompactWriter, CompactReader};
@@ -36,6 +37,7 @@ pub struct CaptureWriter {
     pub packet_data: DataWriter<u8, PACKET_DATA_BLOCK_SIZE>,
     pub packet_index: CompactWriter<PacketId, PacketByteId, 2>,
     pub packet_times: CompactWriter<PacketId, Timestamp, 2>,
+    pub event_times: CompactWriter<EventId, Timestamp, 2>,
     pub transaction_index: CompactWriter<TransactionId, PacketId>,
     pub transfer_index: DataWriter<TransferIndexEntry>,
     pub item_index: CompactWriter<TrafficItemId, TransferId>,
@@ -54,6 +56,7 @@ pub struct CaptureReader {
     pub packet_data: DataReader<u8, PACKET_DATA_BLOCK_SIZE>,
     pub packet_index: CompactReader<PacketId, PacketByteId>,
     pub packet_times: CompactReader<PacketId, Timestamp>,
+    pub event_times: CompactReader<EventId, Timestamp>,
     pub transaction_index: CompactReader<TransactionId, PacketId>,
     pub transfer_index: DataReader<TransferIndexEntry>,
     pub item_index: CompactReader<TrafficItemId, TransferId>,
@@ -72,7 +75,8 @@ pub fn create_capture()
     let (data_writer, data_reader) =
         data_stream_with_block_size::<_, PACKET_DATA_BLOCK_SIZE>()?;
     let (packets_writer, packets_reader) = compact_index()?;
-    let (timestamp_writer, timestamp_reader) = compact_index()?;
+    let (packet_time_writer, packet_time_reader) = compact_index()?;
+    let (event_time_writer, event_time_reader) = compact_index()?;
     let (transactions_writer, transactions_reader) = compact_index()?;
     let (transfers_writer, transfers_reader) = data_stream()?;
     let (items_writer, items_reader) = compact_index()?;
@@ -94,7 +98,8 @@ pub fn create_capture()
         shared: shared.clone(),
         packet_data: data_writer,
         packet_index: packets_writer,
-        packet_times: timestamp_writer,
+        packet_times: packet_time_writer,
+        event_times: event_time_writer,
         transaction_index: transactions_writer,
         transfer_index: transfers_writer,
         item_index: items_writer,
@@ -111,7 +116,8 @@ pub fn create_capture()
         endpoint_readers: VecMap::new(),
         packet_data: data_reader,
         packet_index: packets_reader,
-        packet_times: timestamp_reader,
+        packet_times: packet_time_reader,
+        event_times: event_time_reader,
         transaction_index: transactions_reader,
         transfer_index: transfers_reader,
         item_index: items_reader,
@@ -196,6 +202,7 @@ pub fn create_endpoint()
 
 pub type PacketByteId = Id<u8>;
 pub type PacketId = Id<PacketByteId>;
+pub type EventId = u64;
 pub type Timestamp = u64;
 pub type TransactionId = Id<PacketId>;
 pub type TransferId = Id<TransferIndexEntry>;
@@ -265,21 +272,72 @@ impl std::fmt::Display for Endpoint {
     }
 }
 
-bitfield! {
-    #[derive(Copy, Clone, Debug, Default, Pod, Zeroable)]
-    #[repr(C)]
-    pub struct TransferIndexEntry(u64);
-    pub u64, from into EndpointTransferId, transfer_id, set_transfer_id: 51, 0;
-    pub u64, from into EndpointId, endpoint_id, set_endpoint_id: 62, 52;
-    pub u8, _is_start, _set_is_start: 63, 63;
-}
+#[derive(Copy, Clone, Debug, Default, Pod, Zeroable)]
+#[repr(C)]
+pub struct TransferIndexEntry(u64);
 
 impl TransferIndexEntry {
-    pub fn is_start(&self) -> bool {
-        self._is_start() != 0
+    // If the top bit is set, this is an event entry.
+    pub fn is_event(&self) -> bool {
+        (self.0 & (1 << 63)) != 0
     }
+    pub fn set_is_event(&mut self, value: bool) {
+        let value = value as u64;
+        self.0 = (self.0 & !(1 << 63)) | (value << 63);
+    }
+
+    // The next 8 bits store the event code.
+    pub fn event_code(&self) -> CynthionEvent {
+        let code = (self.0 & (0xFF << 55)) >> 55;
+        CynthionEvent::from(code as u8)
+    }
+
+    pub fn set_event_code(&mut self, event: CynthionEvent) {
+        let code: u8 = event.into();
+        let code: u64 = code.into();
+        self.0 = (self.0 & !(0xFF << 55)) | (code << 55);
+    }
+
+    // The remaining bits 55 bits store an event ID, used to find the timestamp.
+    pub fn event_id(&self) -> EventId {
+        EventId::from(self.0 & (2u64.pow(55) - 1))
+    }
+
+    pub fn set_event_id(&mut self, event_id: EventId) {
+        self.0 = (self.0 & !(2u64.pow(55) - 1))
+            | (event_id & (2u64.pow(55) - 1));
+    }
+
+    // If the top bit is not set, this is a transfer entry.
+
+    // The next bit down indicates whether this is a start or end entry.
+    pub fn is_start(&self) -> bool {
+        (self.0 & (1 << 62)) != 0
+    }
+
     pub fn set_is_start(&mut self, value: bool) {
-        self._set_is_start(value as u8)
+        let value = value as u64;
+        self.0 = (self.0 & !(1 << 62)) | (value << 62);
+    }
+
+    // The following 11 bits hold the endpoint ID.
+    pub fn endpoint_id(&self) -> EndpointId {
+        EndpointId::from((self.0 & ((2u64.pow(11) - 1) << 51)) >> 51)
+    }
+
+    pub fn set_endpoint_id(&mut self, endpoint_id: EndpointId) {
+        self.0 = (self.0 & !((2u64.pow(11) - 1) << 51))
+            | ((endpoint_id.value & (2u64.pow(11) - 1)) << 51);
+    }
+
+    // The remaining 51 bits hold the transfer ID within that endpoint.
+    pub fn transfer_id(&self) -> EndpointTransferId {
+        EndpointTransferId::from(self.0 & (2u64.pow(51) - 1))
+    }
+
+    pub fn set_transfer_id(&mut self, transfer_id: EndpointTransferId) {
+        self.0 = (self.0 & !(2u64.pow(51) - 1))
+            | (transfer_id.value & (2u64.pow(51) - 1));
     }
 }
 
@@ -294,10 +352,13 @@ pub enum EndpointState {
 }
 
 pub const CONTROL_EP_NUM: EndpointNum = EndpointNum(0);
-pub const INVALID_EP_NUM: EndpointNum = EndpointNum(0x10);
-pub const FRAMING_EP_NUM: EndpointNum = EndpointNum(0x11);
-pub const INVALID_EP_ID: EndpointId = EndpointId::constant(0);
-pub const FRAMING_EP_ID: EndpointId = EndpointId::constant(1);
+pub const EVENT_EP_NUM:   EndpointNum = EndpointNum(0x10);
+pub const INVALID_EP_NUM: EndpointNum = EndpointNum(0x11);
+pub const FRAMING_EP_NUM: EndpointNum = EndpointNum(0x12);
+
+pub const EVENT_EP_ID:   EndpointId = EndpointId::constant(0);
+pub const INVALID_EP_ID: EndpointId = EndpointId::constant(1);
+pub const FRAMING_EP_ID: EndpointId = EndpointId::constant(2);
 
 #[derive(Copy, Clone, Debug)]
 pub enum EndpointType {
@@ -1124,7 +1185,7 @@ impl ItemSource<TrafficItem> for CaptureReader {
             },
             Some(Transfer(transfer_id)) => {
                 let entry = self.transfer_index.get(*transfer_id)?;
-                if !entry.is_start() {
+                if entry.is_event() || !entry.is_start() {
                     return Ok((Complete, 0));
                 }
                 let transaction_count = self.transfer_range(&entry)?.len();
@@ -1205,6 +1266,9 @@ impl ItemSource<TrafficItem> for CaptureReader {
                 use EndpointType::*;
                 use usb::EndpointType::*;
                 let entry = self.transfer_index.get(*transfer_id)?;
+                if entry.is_event() {
+                    return Ok(format!("{:?}", entry.event_code()))
+                }
                 let endpoint_id = entry.endpoint_id();
                 let endpoint = self.endpoints.get(endpoint_id)?;
                 let device_id = endpoint.device_id();
@@ -1294,8 +1358,11 @@ impl ItemSource<TrafficItem> for CaptureReader {
             Transfer(i) | Transaction(i, _) | Packet(i, ..) => *i
         };
         let entry = self.transfer_index.get(transfer_id)?;
-        let endpoint_id = entry.endpoint_id();
         let endpoint_state = self.endpoint_state(transfer_id)?;
+        if entry.is_event() {
+            return Ok(" ".repeat(endpoint_state.len()))
+        }
+        let endpoint_id = entry.endpoint_id();
         let extended = self.transfer_extended(endpoint_id, transfer_id)?;
         let ep_traf = self.endpoint_traffic(endpoint_id)?;
         let last_transaction = match item {
@@ -1383,6 +1450,9 @@ impl ItemSource<TrafficItem> for CaptureReader {
         let packet_id = match item {
             Transfer(transfer_id) => {
                 let entry = self.transfer_index.get(*transfer_id)?;
+                if entry.is_event() {
+                    return self.event_times.get(entry.event_id());
+                }
                 let ep_traf = self.endpoint_traffic(entry.endpoint_id())?;
                 let ep_transaction_id =
                     ep_traf.transfer_index.get(entry.transfer_id())?;
@@ -1723,6 +1793,7 @@ pub mod prelude {
         create_endpoint,
         CaptureReader,
         CaptureWriter,
+        CynthionEvent,
         Device,
         DeviceId,
         DeviceData,
@@ -1734,13 +1805,16 @@ pub mod prelude {
         EndpointWriter,
         EndpointTransactionId,
         EndpointTransferId,
+        EventId,
         PacketId,
         TrafficItemId,
         TransactionId,
         TransferId,
         TransferIndexEntry,
+        EVENT_EP_NUM,
         INVALID_EP_NUM,
         FRAMING_EP_NUM,
+        EVENT_EP_ID,
         INVALID_EP_ID,
         FRAMING_EP_ID,
     };

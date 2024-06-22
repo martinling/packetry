@@ -151,7 +151,7 @@ pub struct CynthionStop {
 }
 
 #[repr(u8)]
-#[derive(Copy, Clone, FromPrimitive, IntoPrimitive)]
+#[derive(Debug, Copy, Clone, FromPrimitive, IntoPrimitive)]
 pub enum CynthionEvent {
     NoEvent = 0,
     CaptureStop = 1,
@@ -511,30 +511,37 @@ impl CynthionStream {
             }
         }
 
-        // Do we have the length and timestamp for the next packet/event?
-        if self.buffer.len() < 4 {
-            return None;
+        loop {
+            // Do we have the length and timestamp for the next packet/event?
+            if self.buffer.len() < 4 {
+                return None;
+            }
+
+            if self.buffer[0] == 0xFF {
+                // This is an event.
+                let event_code = self.buffer[1];
+                let event = CynthionEvent::from(event_code);
+
+                // Update our cycle count.
+                self.update_cycle_count();
+
+                // Remove event from buffer.
+                self.buffer.drain(0..4);
+
+                // Return event, unless it's just a timestamp rollover.
+                if !matches!(event, CynthionEvent::NoEvent) {
+                    return Some(CynthionItem {
+                        timestamp_ns: clk_to_ns(self.total_clk_cycles),
+                        payload: CynthionPayload::Event(event)
+                    });
+                }
+            } else {
+                // This is a packet. Process it below.
+                break;
+            }
         }
 
-        if self.buffer[0] == 0xFF {
-            // This is an event.
-            let event_code = self.buffer[1];
-            let event = CynthionEvent::from(event_code);
-
-            // Update our cycle count.
-            self.update_cycle_count();
-
-            // Remove event from buffer.
-            self.buffer.drain(0..4);
-
-            // Return event.
-            return Some(CynthionItem {
-                timestamp_ns: clk_to_ns(self.total_clk_cycles),
-                payload: CynthionPayload::Event(event)
-            });
-        }
-
-        // Otherwise, this is a packet. Do we have all the data for it?
+        // This is a packet. Do we have all the data for it?
         let packet_len = u16::from_be_bytes(
             [self.buffer[0], self.buffer[1]]) as usize;
         if self.buffer.len() <= 4 + packet_len {

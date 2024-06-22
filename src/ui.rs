@@ -653,21 +653,23 @@ pub fn update_view() -> Result<(), Error> {
         if ui.show_progress == Some(Save) {
             more_updates = true;
         } else {
-            let (devices, endpoints, transactions, packets) = {
+            let (devices, endpoints, transactions, packets, events) = {
                 let cap = &ui.capture;
                 let devices = cap.devices.len() - 1;
-                let endpoints = cap.endpoints.len() - 2;
+                let endpoints = cap.endpoints.len() - 3;
                 let transactions = cap.transaction_index.len();
                 let packets = cap.packet_index.len();
-                (devices, endpoints, transactions, packets)
+                let events = cap.event_times.len();
+                (devices, endpoints, transactions, packets, events)
             };
             ui.status_label.set_text(&format!(
-                "{}: {} devices, {} endpoints, {} transactions, {} packets",
+                "{}: {} devices, {} endpoints, {} transactions, {} packets, {} events",
                 ui.file_name.as_deref().unwrap_or("Unsaved capture"),
                 fmt_count(devices),
                 fmt_count(endpoints),
                 fmt_count(transactions),
-                fmt_count(packets)
+                fmt_count(packets),
+                fmt_count(events)
             ));
             if let Some(model) = &ui.traffic_model {
                 let old_count = model.n_items();
@@ -909,7 +911,8 @@ pub fn start_cynthion() -> Result<(), Error> {
                 match item.payload {
                     Packet(bytes) =>
                         decoder.handle_raw_packet(&bytes, item.timestamp_ns)?,
-                    Event(_event) => {}
+                    Event(event) =>
+                        decoder.handle_cynthion_event(event, item.timestamp_ns)?,
                 };
             }
             decoder.finish()?;

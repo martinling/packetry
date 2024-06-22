@@ -548,9 +548,9 @@ impl Decoder {
         device_data.set(default_id, Arc::new(DeviceData::default()));
         decoder.device_index.set(default_addr, default_id);
 
-        // Add the special endpoints for invalid and framing packets.
+        // Add the special endpoints.
         let mut endpoint_readers = VecMap::new();
-        for ep_number in [INVALID_EP_NUM, FRAMING_EP_NUM] {
+        for ep_number in [EVENT_EP_NUM, INVALID_EP_NUM, FRAMING_EP_NUM] {
             let (writer, reader) = create_endpoint()?;
             let mut endpoint = Endpoint::default();
             endpoint.set_device_id(default_id);
@@ -585,6 +585,17 @@ impl Decoder {
         let packet_id = self.capture.packet_index.push(data_range.start)?;
         self.capture.packet_times.push(timestamp_ns)?;
         self.transaction_update(packet_id, packet)?;
+        Ok(())
+    }
+
+    pub fn handle_cynthion_event(&mut self,
+                                 event: CynthionEvent,
+                                 timestamp_ns: u64)
+        -> Result<(), Error>
+    {
+        let event_id = self.capture.event_times.push(timestamp_ns)?;
+        let transfer_id = self.add_event_entry(event, event_id)?;
+        self.add_item(EVENT_EP_ID, transfer_id)?;
         Ok(())
     }
 
@@ -1002,6 +1013,19 @@ impl Decoder {
         entry.set_endpoint_id(endpoint_id);
         entry.set_transfer_id(ep_transfer_id);
         entry.set_is_start(start);
+        entry.set_is_event(false);
+        let transfer_id = self.capture.transfer_index.push(&entry)?;
+        Ok(transfer_id)
+    }
+
+    fn add_event_entry(&mut self, event: CynthionEvent, event_id: EventId)
+        -> Result<TransferId, Error>
+    {
+        self.add_endpoint_state(EVENT_EP_ID, false)?;
+        let mut entry = TransferIndexEntry::default();
+        entry.set_is_event(true);
+        entry.set_event_code(event);
+        entry.set_event_id(event_id);
         let transfer_id = self.capture.transfer_index.push(&entry)?;
         Ok(transfer_id)
     }
