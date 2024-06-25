@@ -105,7 +105,9 @@ fn test(save_capture: bool,
             Packet(bytes) => decoder
                 .handle_raw_packet(&bytes, item.timestamp_ns)
                 .context("Error decoding packet")?,
-            Event(_event) => {},
+            Event(event) => decoder
+                .handle_cynthion_event(event, item.timestamp_ns)
+                .context("Error handling USB event")?,
         }
     }
 
@@ -141,9 +143,9 @@ fn test(save_capture: bool,
     if let Some((min_interval, max_interval, min_count)) = sof {
         println!("Checking SOF timestamp intervals");
         // Check SOF timestamps have the expected spacing.
-        // SOF packets are assigned to endpoint ID 1.
+        // SOF packets are assigned to endpoint ID 2.
         // We're looking for the first and only transfer on the endpoint.
-        let endpoint_id = EndpointId::from(1);
+        let endpoint_id = EndpointId::from(2);
         let ep_transfer_id = EndpointTransferId::from(0);
         let ep_traf = reader.endpoint_traffic(endpoint_id)?;
         let ep_transaction_ids = ep_traf.transfer_index
@@ -182,12 +184,12 @@ fn test(save_capture: bool,
 }
 
 fn bytes_on_endpoint(reader: &mut CaptureReader) -> Result<Vec<u8>, Error> {
-    // Endpoint IDs 0 and 1 are special (used for invalid and framing packets).
-    // Endpoint 2 will be the control endpoint for device zero.
-    // Endpoint 3 wil be the control endpoint for the test device.
+    // Endpoint IDs 0-2 are special.
+    // Endpoint 3 will be the control endpoint for device zero.
+    // Endpoint 4 wil be the control endpoint for the test device.
     
-    // The first normal endpoint in the capture will have endpoint ID 4.
-    let endpoint_id = EndpointId::from(4);
+    // The first normal endpoint in the capture will have endpoint ID 5.
+    let endpoint_id = EndpointId::from(5);
     // We're looking for the first and only transfer on the endpoint.
     let ep_transfer_id = EndpointTransferId::from(0);
     let ep_traf = reader.endpoint_traffic(endpoint_id)?;
