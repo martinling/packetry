@@ -73,13 +73,15 @@ bitfield! {
     struct State(u8);
     bool, enable, set_enable: 0;
     u8, from into Speed, speed, set_speed: 2, 1;
+    bool, discard, set_discard: 3;
 }
 
 impl State {
-    fn new(enable: bool, speed: Speed) -> State {
+    fn new(enable: bool, speed: Speed, discard: bool) -> State {
         let mut state = State(0);
         state.set_enable(enable);
         state.set_speed(speed);
+        state.set_discard(discard);
         state
     }
 }
@@ -365,13 +367,13 @@ impl CynthionHandle {
     }
 
     fn start_capture(&mut self, speed: Speed) -> Result<(), Error> {
-        self.write_request(1, State::new(true, speed).0)?;
+        self.write_request(1, State::new(true, speed, false).0)?;
         println!("Capture enabled, speed: {}", speed.description());
         Ok(())
     }
 
     fn stop_capture(&mut self) -> Result<(), Error> {
-        self.write_request(1, State::new(false, Speed::High).0)?;
+        self.write_request(1, State::new(false, Speed::High, false).0)?;
         println!("Capture disabled");
         Ok(())
     }
@@ -382,6 +384,12 @@ impl CynthionHandle {
         let test_config = TestConfig::new(speed);
         self.write_request(3, test_config.0)
             .context("Failed to set test device configuration")
+    }
+
+    pub fn discard(&mut self) -> Result<(), Error> {
+        self.write_request(1, State::new(false, Speed::High, true).0)?;
+        println!("Discard enabled");
+        Ok(())
     }
 
     fn write_request(&mut self, request: u8, value: u8) -> Result<(), Error> {

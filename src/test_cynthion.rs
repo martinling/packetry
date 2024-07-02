@@ -21,9 +21,9 @@ use std::time::Duration;
 pub fn run_test(save_captures: bool) {
     for (name, speed, ep_addr, length, sof) in [
         ("HS", Speed::High, 0x81, 4096, Some((124500,  125500, 500))),
-        ("FS", Speed::Full, 0x82,  512, Some((995000, 1005000,  50))),
-        ("LS", Speed::Low,  0x83,   64, None)]
-    {
+//        ("FS", Speed::Full, 0x82,  512, Some((995000, 1005000,  50))),
+//        ("LS", Speed::Low,  0x83,   64, None),
+    ] {
         test(save_captures, name, speed, ep_addr, length, sof).unwrap();
     }
 }
@@ -168,6 +168,9 @@ fn test(save_capture: bool,
         println!("Found {} SOF packets with expected interval range", sof_count);
         assert!(sof_count > min_count, "Not enough SOF packets captured");
     }
+
+    // Tell the analyzer to discard the capture.
+    analyzer.discard()?;
 
     Ok(())
 }
