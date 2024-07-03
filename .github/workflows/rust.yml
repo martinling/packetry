@@ -67,6 +67,12 @@ jobs:
         run: brew install gtk4 pkg-config
         if: matrix.os == 'macos-latest'
 
+      - name: Install cargo-wix (Windows)
+        uses: taiki-e/cache-cargo-install-action@v2
+        with:
+          tool: cargo-wix
+        if: matrix.os == 'windows-latest'
+
       - name: Install dependencies (Windows)
         uses: lukka/run-vcpkg@v11
         with:
@@ -98,10 +104,24 @@ jobs:
         with:
           run: cargo test
 
-      - uses: actions/upload-artifact@v2
+      - name: Build installer (Windows)
+        run: cargo wix --no-build --nocapture -v
+        if: matrix.os == 'windows-latest'
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v2
         with:
-          name: Packetry ${{ matrix.os }}
+          name: Binary for ${{ matrix.os }}
           path: |
             target/release/packetry
             target/release/packetry.exe
+          if-no-files-found: error
 
+      - name: Upload installer (Windows)
+        uses: actions/upload-artifact@v2
+        with:
+          name: Windows installer
+          path: |
+            target/wix/*.msi
+          if-no-files-found: error
+        if: runner.os == 'Windows'
