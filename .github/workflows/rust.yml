@@ -73,6 +73,12 @@ jobs:
           tool: cargo-wix
         if: matrix.os == 'windows-latest'
 
+      - name: Install cargo-license (Windows)
+        uses: taiki-e/cache-cargo-install-action@v2
+        with:
+          tool: cargo-license
+        if: matrix.os == 'windows-latest'
+
       - name: Install dependencies (Windows)
         uses: lukka/run-vcpkg@v11
         with:
@@ -103,6 +109,12 @@ jobs:
         uses: GabrielBB/xvfb-action@v1
         with:
           run: cargo test
+
+      - name: List dependencies (Windows)
+        run: |
+          python wix/rust_licenses.py > wix/LICENSE-static-libraries.txt
+          python wix/vcpkg_licenses.py > wix/LICENSE-dynamic-libraries.txt
+        if: matrix.os == 'windows-latest'
 
       - name: Build installer (Windows)
         run: cargo wix --no-build --nocapture -v

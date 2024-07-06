@@ -38,25 +38,15 @@
             <Directory Id='$(var.PlatformProgramFilesFolder)' Name='PFiles'>
                 <Directory Id='APPLICATIONFOLDER' Name='Packetry'>
                     
-                    <!--
-                      Enabling the license sidecar file in the installer is a four step process:
-
-                      1. Uncomment the `Component` tag and its contents.
-                      2. Change the value for the `Source` attribute in the `File` tag to a path
-                         to the file that should be included as the license sidecar file. The path
-                         can, and probably should be, relative to this file.
-                      3. Change the value for the `Name` attribute in the `File` tag to the
-                         desired name for the file when it is installed alongside the `bin` folder
-                         in the installation directory. This can be omitted if the desired name is
-                         the same as the file name.
-                      4. Uncomment the `ComponentRef` tag with the Id attribute value of "License"
-                         further down in this file.
-                    -->
-                    <!--
-                    <Component Id='License' Guid='*'>
-                        <File Id='LicenseFile' Name='ChangeMe' DiskId='1' Source='C:\Path\To\File' KeyPath='yes'/>
+                    <Component Id='LICENSE_packetry' Guid='25f09134-ab56-4028-ad5c-461edf5a850a'>
+                        <File Id='LICENSE_packetry' Name='LICENSE-packetry.txt' DiskId='1' Source='LICENSE'/>
                     </Component>
-                    -->
+                    <Component Id='LICENSE_static_libraries' Guid='3ba11a89-de46-40c8-b2ca-68d4ea7257b1'>
+                        <File Id='LICENSE_static_libraries' Name='LICENSE-static-libraries.txt' DiskId='1' Source='wix/LICENSE-static-libraries.txt'/>
+                    </Component>
+                    <Component Id='LICENSE_dynamic_libraries' Guid='40f0f16e-e70f-4f16-af2a-d3e19413375c'>
+                        <File Id='LICENSE_dynamic_libraries' Name='LICENSE-dynamic-libraries.txt' DiskId='1' Source='wix/LICENSE-dynamic-libraries.txt'/>
+                    </Component>
 
                     <Directory Id='Bin' Name='bin'>
                         <Component Id='Path' Guid='11E1B3A0-F153-41F2-8080-7225FB20816F' KeyPath='yes'>
@@ -141,11 +131,9 @@
             Display='expand'
             Absent='disallow'>
             
-            <!--
-              Uncomment the following `ComponentRef` tag to add the license
-              sidecar file to the installer.
-            -->
-            <!--<ComponentRef Id='License'/>-->
+            <ComponentRef Id='LICENSE_packetry'/>
+            <ComponentRef Id='LICENSE_static_libraries'/>
+            <ComponentRef Id='LICENSE_dynamic_libraries'/>
 
             <ComponentRef Id='binary0'/>
 
@@ -225,28 +213,10 @@
         <UI>
             <UIRef Id='WixUI_FeatureTree'/>
             
-            <!--
-              Enabling the EULA dialog in the installer is a three step process:
-
-                1. Comment out or remove the two `Publish` tags that follow the
-                   `WixVariable` tag.
-                2. Uncomment the `<WixVariable Id='WixUILicenseRtf' Value='Path\to\Eula.rft'>` tag further down
-                3. Replace the `Value` attribute of the `WixVariable` tag with
-                   the path to a RTF file that will be used as the EULA and
-                   displayed in the license agreement dialog.
-            -->
             <Publish Dialog='WelcomeDlg' Control='Next' Event='NewDialog' Value='CustomizeDlg' Order='99'>1</Publish>
             <Publish Dialog='CustomizeDlg' Control='Back' Event='NewDialog' Value='WelcomeDlg' Order='99'>1</Publish>
 
         </UI>
-
-        
-        <!--
-          Enabling the EULA dialog in the installer requires uncommenting
-          the following `WixUILicenseRTF` tag and changing the `Value`
-          attribute.
-        -->
-        <!-- <WixVariable Id='WixUILicenseRtf' Value='Relative\Path\to\Eula.rtf'/> -->
 
         
         <!--
