@@ -194,6 +194,15 @@ fn test(save_capture: bool,
         assert!(sof_count > min_count, "Not enough SOF packets captured");
     }
 
+    // Look for the stop event.
+    let item_count = reader.item_index.len();
+    let stop_item_id = TrafficItemId::from(item_count - 1);
+    let stop_transfer_id = reader.item_index.get(stop_item_id)?;
+    let stop_entry = reader.transfer_index.get(stop_transfer_id)?;
+    assert!(stop_entry.is_event());
+    assert_eq!(stop_entry.event_code(), CaptureStop);
+    println!("Found stop event in capture");
+
     Ok(())
 }
 
