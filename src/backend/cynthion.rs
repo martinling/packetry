@@ -152,7 +152,7 @@ pub struct CynthionStop {
 }
 
 #[repr(u8)]
-#[derive(Debug, Copy, Clone, FromPrimitive, IntoPrimitive)]
+#[derive(Debug, Copy, Clone, FromPrimitive, IntoPrimitive, PartialEq)]
 pub enum CynthionEvent {
     NoEvent = 0,
     CaptureStop = 1,

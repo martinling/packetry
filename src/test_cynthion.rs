@@ -1,8 +1,9 @@
 use crate::backend::cynthion::{
     CynthionDevice,
+    CynthionEvent::{self, *},
     CynthionPayload::*,
     CynthionUsability,
-    Speed
+    Speed::{self, *},
 };
 use crate::capture::{
     create_capture,
@@ -11,6 +12,7 @@ use crate::capture::{
     EndpointId,
     EndpointTransferId,
     PacketId,
+    TrafficItemId,
 };
 use crate::decoder::Decoder;
 use crate::pcap::Writer;
@@ -24,18 +26,19 @@ use std::thread::sleep;
 use std::time::Duration;
 
 pub fn run_test(save_captures: bool) {
-    for (name, speed, ep_addr, length, sof) in [
-        ("HS", Speed::High, 0x81, 4096, Some((124500,  125500, 500))),
-        ("FS", Speed::Full, 0x82,  512, Some((995000, 1005000,  50))),
-        ("LS", Speed::Low,  0x83,   64, None)]
+    for (name, speed, start, ep_addr, length, sof) in [
+        ("HS", High, CaptureStartHigh, 0x81, 4096, Some((124500,  125500, 500))),
+        ("FS", Full, CaptureStartFull, 0x82,  512, Some((995000, 1005000,  50))),
+        ("LS", Low,  CaptureStartLow,  0x83,   64, None)]
     {
-        test(save_captures, name, speed, ep_addr, length, sof).unwrap();
+        test(save_captures, name, speed, start, ep_addr, length, sof).unwrap();
     }
 }
 
 fn test(save_capture: bool,
         name: &str,
         speed: Speed,
+        start: CynthionEvent,
         ep_addr: u8,
         length: usize,
         sof: Option<(u64, u64, u64)>)
@@ -123,6 +126,17 @@ fn test(save_capture: bool,
         }
         writer.close()?;
     }
+
+    // Look for the start event.
+    let start_item_id = TrafficItemId::from(0);
+    let start_transfer_id = reader.item_index.get(start_item_id)?;
+    let start_entry = reader.transfer_index.get(start_transfer_id)?;
+    assert!(start_entry.is_event());
+    assert_eq!(start_entry.event_code(), start);
+    assert_eq!(start_entry.event_id(), 0);
+    let start_time = reader.event_times.get(0)?;
+    assert_eq!(start_time, 0);
+    println!("Found start event in capture");
 
     // Look for the test device in the capture.
     let device_id = DeviceId::from(1);
