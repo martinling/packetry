@@ -111,6 +111,13 @@ enum FileAction {
     Save,
 }
 
+#[derive(Copy, Clone, PartialEq)]
+enum StopState {
+    Disabled,
+    Pcap,
+    Cynthion,
+}
+
 struct DeviceSelector {
     devices: Vec<CynthionDevice>,
     dev_strings: Vec<String>,
@@ -311,6 +318,7 @@ pub struct UserInterface {
     selector: DeviceSelector,
     file_name: Option<String>,
     stop_handle: Option<CynthionStop>,
+    stop_state: StopState,
     traffic_window: ScrolledWindow,
     device_window: ScrolledWindow,
     pub traffic_model: Option<TrafficModel>,
@@ -356,6 +364,19 @@ pub fn activate(application: &Application) -> Result<(), Error> {
         .title("Packetry")
         .build();
 
+    let stop_action = ActionEntry::builder("stop")
+        .activate(|_: &ApplicationWindow, _, _| {
+            let mut state = StopState::Disabled;
+            display_error(with_ui(|ui| { state = ui.stop_state; Ok(()) }));
+            display_error(match state {
+                StopState::Pcap => stop_pcap(),
+                StopState::Cynthion => stop_cynthion(),
+                StopState::Disabled => Ok(()),
+            });
+        })
+        .build();
+    window.add_action_entries([stop_action]);
+
     let action_bar = gtk::ActionBar::new();
 
     let open_button = gtk::Button::builder()
@@ -377,6 +398,7 @@ pub fn activate(application: &Application) -> Result<(), Error> {
     let stop_button = gtk::Button::builder()
         .icon_name("media-playback-stop")
         .tooltip_text("Stop")
+        .action_name("win.stop")
         .build();
 
     open_button.set_sensitive(true);
@@ -510,6 +532,7 @@ pub fn activate(application: &Application) -> Result<(), Error> {
                 selector,
                 file_name: None,
                 stop_handle: None,
+                stop_state: StopState::Disabled,
                 traffic_window,
                 device_window,
                 traffic_model: None,
@@ -894,8 +917,7 @@ fn start_pcap(action: FileAction, file: gio::File) -> Result<(), Error> {
         ui.selector.set_sensitive(false);
         ui.capture_button.set_sensitive(false);
         ui.stop_button.set_sensitive(true);
-        let signal_id = ui.stop_button.connect_clicked(|_|
-            display_error(stop_pcap()));
+        ui.stop_state = StopState::Pcap;
         ui.vbox.insert_child_after(&ui.separator, Some(&ui.vertical_panes));
         ui.vbox.insert_child_after(&ui.progress_bar, Some(&ui.separator));
         ui.show_progress = Some(action);
@@ -935,7 +957,7 @@ fn start_pcap(action: FileAction, file: gio::File) -> Result<(), Error> {
                         ui.show_progress = None;
                         ui.vbox.remove(&ui.separator);
                         ui.vbox.remove(&ui.progress_bar);
-                        ui.stop_button.disconnect(signal_id);
+                        ui.stop_state = StopState::Disabled;
                         ui.stop_button.set_sensitive(false);
                         ui.open_button.set_sensitive(true);
                         ui.save_button.set_sensitive(true);
@@ -1055,8 +1077,7 @@ pub fn start_cynthion() -> Result<(), Error> {
         ui.selector.set_sensitive(false);
         ui.capture_button.set_sensitive(false);
         ui.stop_button.set_sensitive(true);
-        let signal_id = ui.stop_button.connect_clicked(|_|
-            display_error(stop_cynthion()));
+        ui.stop_state = StopState::Cynthion;
         let read_cynthion = move || {
             let mut decoder = Decoder::new(writer)?;
             for packet in stream_handle {
@@ -1070,7 +1091,7 @@ pub fn start_cynthion() -> Result<(), Error> {
             gtk::glib::idle_add_once(|| {
                 display_error(
                     with_ui(|ui| {
-                        ui.stop_button.disconnect(signal_id);
+                        ui.stop_state = StopState::Disabled;
                         ui.stop_button.set_sensitive(false);
                         ui.open_button.set_sensitive(true);
                         ui.selector.set_sensitive(true);
