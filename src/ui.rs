@@ -111,11 +111,10 @@ enum FileAction {
     Save,
 }
 
-#[derive(Copy, Clone, PartialEq)]
 enum StopState {
     Disabled,
-    Pcap,
-    Cynthion,
+    Pcap(Cancellable),
+    Cynthion(CynthionStop),
 }
 
 struct DeviceSelector {
@@ -317,7 +316,6 @@ pub struct UserInterface {
     pub capture: CaptureReader,
     selector: DeviceSelector,
     file_name: Option<String>,
-    stop_handle: Option<CynthionStop>,
     stop_state: StopState,
     traffic_window: ScrolledWindow,
     device_window: ScrolledWindow,
@@ -326,7 +324,6 @@ pub struct UserInterface {
     detail_text: TextBuffer,
     endpoint_count: u16,
     show_progress: Option<FileAction>,
-    cancel_handle: Cancellable,
     progress_bar: ProgressBar,
     separator: Separator,
     vbox: gtk::Box,
@@ -382,17 +379,8 @@ pub fn activate(application: &Application) -> Result<(), Error> {
     let save_action = button_action!("save", save_button, choose_file(Save));
     let scan_action = button_action!("scan", scan_button, detect_hardware());
     let capture_action = button_action!("capture", capture_button, start_cynthion());
-    let stop_action = ActionEntry::builder("stop")
-        .activate(|_: &ApplicationWindow, _, _| {
-            let mut state = StopState::Disabled;
-            display_error(with_ui(|ui| { state = ui.stop_state; Ok(()) }));
-            display_error(match state {
-                StopState::Pcap => stop_pcap(),
-                StopState::Cynthion => stop_cynthion(),
-                StopState::Disabled => Ok(()),
-            });
-        })
-        .build();
+    let stop_action = button_action!("stop", stop_button, stop_operation());
+
     window.add_action_entries([open_action, save_action, scan_action, capture_action, stop_action]);
 
     #[cfg(not(target_os="macos"))]
@@ -566,7 +554,6 @@ pub fn activate(application: &Application) -> Result<(), Error> {
                 capture,
                 selector,
                 file_name: None,
-                stop_handle: None,
                 stop_state: StopState::Disabled,
                 traffic_window,
                 device_window,
@@ -575,7 +562,6 @@ pub fn activate(application: &Application) -> Result<(), Error> {
                 detail_text,
                 endpoint_count: 2,
                 show_progress: None,
-                cancel_handle: Cancellable::new(),
                 progress_bar,
                 separator,
                 vbox,
@@ -942,6 +928,7 @@ fn start_pcap(action: FileAction, file: gio::File) -> Result<(), Error> {
         None
     };
     with_ui(|ui| {
+        let cancel_handle = Cancellable::new();
         #[cfg(feature="record-ui-test")]
         ui.recording.borrow_mut().log_open_file(
             &file.path().context("Cannot record UI test for non-local path")?,
@@ -952,7 +939,7 @@ fn start_pcap(action: FileAction, file: gio::File) -> Result<(), Error> {
         ui.selector.set_sensitive(false);
         ui.capture_button.set_sensitive(false);
         ui.stop_button.set_sensitive(true);
-        ui.stop_state = StopState::Pcap;
+        ui.stop_state = StopState::Pcap(cancel_handle.clone());
         ui.vbox.insert_child_after(&ui.separator, Some(&ui.vertical_panes));
         ui.vbox.insert_child_after(&ui.progress_bar, Some(&ui.separator));
         ui.show_progress = Some(action);
@@ -960,7 +947,6 @@ fn start_pcap(action: FileAction, file: gio::File) -> Result<(), Error> {
             .basename()
             .map(|path| path.to_string_lossy().to_string());
         let capture = ui.capture.clone();
-        let cancel_handle = ui.cancel_handle.clone();
         let packet_count = capture.packet_index.len();
         CURRENT.store(0, Ordering::Relaxed);
         TOTAL.store(match action {
@@ -988,7 +974,6 @@ fn start_pcap(action: FileAction, file: gio::File) -> Result<(), Error> {
                 STOP.store(false, Ordering::Relaxed);
                 display_error(
                     with_ui(|ui| {
-                        ui.cancel_handle = Cancellable::new();
                         ui.show_progress = None;
                         ui.vbox.remove(&ui.separator);
                         ui.vbox.remove(&ui.progress_bar);
@@ -1072,12 +1057,22 @@ fn save_pcap(file: gio::File,
     Ok(())
 }
 
-pub fn stop_pcap() -> Result<(), Error> {
-    STOP.store(true, Ordering::Relaxed);
+pub fn stop_operation() -> Result<(), Error> {
     with_ui(|ui| {
-        ui.cancel_handle.cancel();
-        ui.scan_button.set_sensitive(true);
+        match std::mem::replace(&mut ui.stop_state, StopState::Disabled) {
+            StopState::Disabled => {},
+            StopState::Pcap(cancel_handle) => {
+                STOP.store(true, Ordering::Relaxed);
+                cancel_handle.cancel();
+            },
+            StopState::Cynthion(stop_handle) => {
+                stop_handle.stop()?;
+                ui.scan_button.set_sensitive(true);
+            }
+        };
         ui.stop_button.set_sensitive(false);
+        ui.scan_button.set_sensitive(true);
+        ui.save_button.set_sensitive(true);
         Ok(())
     })
 }
@@ -1106,13 +1101,12 @@ pub fn start_cynthion() -> Result<(), Error> {
         let (cynthion, speed) = ui.selector.open()?;
         let (stream_handle, stop_handle) =
             cynthion.start(speed, display_error)?;
-        ui.stop_handle.replace(stop_handle);
         ui.open_button.set_sensitive(false);
         ui.scan_button.set_sensitive(false);
         ui.selector.set_sensitive(false);
         ui.capture_button.set_sensitive(false);
         ui.stop_button.set_sensitive(true);
-        ui.stop_state = StopState::Cynthion;
+        ui.stop_state = StopState::Cynthion(stop_handle);
         let read_cynthion = move || {
             let mut decoder = Decoder::new(writer)?;
             for packet in stream_handle {
@@ -1139,17 +1133,6 @@ pub fn start_cynthion() -> Result<(), Error> {
         gtk::glib::timeout_add_once(
             UPDATE_INTERVAL,
             || display_error(update_view()));
-        Ok(())
-    })
-}
-
-pub fn stop_cynthion() -> Result<(), Error> {
-    with_ui(|ui| {
-        if let Some(stop_handle) = ui.stop_handle.take() {
-            stop_handle.stop()?;
-        }
-        ui.scan_button.set_sensitive(true);
-        ui.save_button.set_sensitive(true);
         Ok(())
     })
 }
