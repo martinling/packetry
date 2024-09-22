@@ -1,47 +1,33 @@
 use std::cmp::Ordering;
 use std::collections::VecDeque;
-use std::thread::{spawn, sleep};
 use std::time::Duration;
 use std::sync::mpsc;
 
 use anyhow::{Context as ErrorContext, Error, bail};
-use futures_channel::oneshot;
-use futures_lite::future::block_on;
-use futures_util::future::FusedFuture;
-use futures_util::{select_biased, FutureExt};
 use nusb::{
     self,
     transfer::{
         Control,
         ControlType,
-        Queue,
         Recipient,
-        RequestBuffer,
-        TransferError,
     },
     DeviceInfo,
     Interface
 };
 
 use super::{
-    BackendStop,
-    DeviceUsability,
-    InterfaceSelection,
+    CaptureDevice,
+    CaptureHandle,
     Speed,
-    handle_thread_panic,
-    TracePacket,
+    TimestampedPacket,
+    TransferQueue,
 };
-use super::DeviceUsability::*;
 
-const VID: u16 = 0x1d50;
-const PID: u16 = 0x615b;
-
+pub const VID_PID: (u16, u16) = (0x1d50, 0x615b);
 const CLASS: u8 = 0xff;
 const SUBCLASS: u8 = 0x10;
 const PROTOCOL: u8 = 0x01;
-
 const ENDPOINT: u8 = 0x81;
-
 const READ_LEN: usize = 0x4000;
 const NUM_TRANSFERS: usize = 4;
 
@@ -86,8 +72,10 @@ impl TestConfig {
 
 /// A Cynthion device attached to the system.
 pub struct CynthionDevice {
-    pub device_info: DeviceInfo,
-    pub usability: DeviceUsability,
+    device_info: DeviceInfo,
+    interface_number: u8,
+    alt_setting_number: u8,
+    speeds: Vec<Speed>,
 }
 
 /// A handle to an open Cynthion device.
@@ -96,11 +84,7 @@ pub struct CynthionHandle {
     interface: Interface,
 }
 
-pub struct CynthionQueue {
-    tx: mpsc::Sender<Vec<u8>>,
-    queue: Queue<RequestBuffer>,
-}
-
+/// Converts from received data bytes to timestamped packets.
 pub struct CynthionStream {
     receiver: mpsc::Receiver<Vec<u8>>,
     buffer: VecDeque<u8>,
@@ -116,116 +100,146 @@ fn clk_to_ns(clk_cycles: u64) -> u64 {
     quotient * 50 + TABLE[remainder as usize]
 }
 
-/// Check whether a Cynthion device has an accessible analyzer interface.
-fn check_device(device_info: &DeviceInfo)
-    -> Result<(InterfaceSelection, Vec<Speed>), Error>
-{
-    // Check we can open the device.
-    let device = device_info
-        .open()
-        .context("Failed to open device")?;
-
-    // Read the active configuration.
-    let config = device
-        .active_configuration()
-        .context("Failed to retrieve active configuration")?;
-
-    // Iterate over the interfaces...
-    for interface in config.interfaces() {
-        let interface_number = interface.interface_number();
-
-        // ...and alternate settings...
-        for alt_setting in interface.alt_settings() {
-            let alt_setting_number = alt_setting.alternate_setting();
-
-            // Ignore if this is not our supported target.
-            if alt_setting.class() != CLASS ||
-               alt_setting.subclass() != SUBCLASS
-            {
-                continue;
-            }
-
-            // Check protocol version.
-            let protocol = alt_setting.protocol();
-            #[allow(clippy::absurd_extreme_comparisons)]
-            match PROTOCOL.cmp(&protocol) {
-                Ordering::Less =>
-                    bail!("Analyzer gateware is newer (v{}) than supported by this version of Packetry (v{}). Please update Packetry.", protocol, PROTOCOL),
-                Ordering::Greater =>
-                    bail!("Analyzer gateware is older (v{}) than supported by this version of Packetry (v{}). Please update gateware.", protocol, PROTOCOL),
-                Ordering::Equal => {}
-            }
-
-            // Try to claim the interface.
-            let interface = device
-                .claim_interface(interface_number)
-                .context("Failed to claim interface")?;
-
-            // Select the required alternate, if not the default.
-            if alt_setting_number != 0 {
-                interface
-                    .set_alt_setting(alt_setting_number)
-                    .context("Failed to select alternate setting")?;
-            }
-
-            // Fetch the available speeds.
-            let handle = CynthionHandle { interface };
-            let speeds = handle
-                .speeds()
-                .context("Failed to fetch available speeds")?;
-
-            // Now we have a usable device.
-            return Ok((
-                InterfaceSelection {
-                    interface_number,
-                    alt_setting_number,
-                },
-                speeds
-            ))
-        }
-    }
-
-    bail!("No supported analyzer interface found");
+/// Probe a Cynthion device.
+pub fn probe(device_info: DeviceInfo) -> Result<Box<dyn CaptureDevice>, Error> {
+    Ok(Box::new(CynthionDevice::new(device_info)?))
 }
 
 impl CynthionDevice {
-    pub fn scan() -> Result<Vec<CynthionDevice>, Error> {
-        Ok(nusb::list_devices()?
-            .filter(|info| info.vendor_id() == VID)
-            .filter(|info| info.product_id() == PID)
-            .map(|device_info|
-                match check_device(&device_info) {
-                    Ok((iface, speeds)) => CynthionDevice {
-                        device_info,
-                        usability: Usable(iface, speeds)
-                    },
-                    Err(err) => CynthionDevice {
-                        device_info,
-                        usability: Unusable(format!("{}", err))
-                    }
+    pub fn new(device_info: DeviceInfo) -> Result<CynthionDevice, Error> {
+
+        // Check we can open the device.
+        let device = device_info
+            .open()
+            .context("Failed to open device")?;
+
+        // Read the active configuration.
+        let config = device
+            .active_configuration()
+            .context("Failed to retrieve active configuration")?;
+
+        // Iterate over the interfaces...
+        for interface in config.interfaces() {
+            let interface_number = interface.interface_number();
+
+            // ...and alternate settings...
+            for alt_setting in interface.alt_settings() {
+                let alt_setting_number = alt_setting.alternate_setting();
+
+                // Ignore if this is not our supported target.
+                if alt_setting.class() != CLASS ||
+                   alt_setting.subclass() != SUBCLASS
+                {
+                    continue;
                 }
-            )
-            .collect())
+
+                // Check protocol version.
+                let protocol = alt_setting.protocol();
+                #[allow(clippy::absurd_extreme_comparisons)]
+                match PROTOCOL.cmp(&protocol) {
+                    Ordering::Less =>
+                        bail!("Analyzer gateware is newer (v{}) than supported by this version of Packetry (v{}). Please update Packetry.", protocol, PROTOCOL),
+                    Ordering::Greater =>
+                        bail!("Analyzer gateware is older (v{}) than supported by this version of Packetry (v{}). Please update gateware.", protocol, PROTOCOL),
+                    Ordering::Equal => {}
+                }
+
+                // Try to claim the interface.
+                let interface = device
+                    .claim_interface(interface_number)
+                    .context("Failed to claim interface")?;
+
+                // Select the required alternate, if not the default.
+                if alt_setting_number != 0 {
+                    interface
+                        .set_alt_setting(alt_setting_number)
+                        .context("Failed to select alternate setting")?;
+                }
+
+                // Fetch the available speeds.
+                let handle = CynthionHandle { interface };
+                let speeds = handle
+                    .fetch_speeds()
+                    .context("Failed to fetch available speeds")?;
+
+                // Now we have a usable device.
+                return Ok(
+                    CynthionDevice {
+                        device_info,
+                        interface_number,
+                        alt_setting_number,
+                        speeds,
+                    }
+                )
+            }
+        }
+
+        bail!("No supported analyzer interface found");
     }
 
+    /// Open this device.
     pub fn open(&self) -> Result<CynthionHandle, Error> {
-        match &self.usability {
-            Usable(iface, _) => {
-                let device = self.device_info.open()?;
-                let interface = device.claim_interface(iface.interface_number)?;
-                if iface.alt_setting_number != 0 {
-                    interface.set_alt_setting(iface.alt_setting_number)?;
-                }
-                Ok(CynthionHandle { interface })
-            },
-            Unusable(reason) => bail!("Device not usable: {}", reason),
+        let device = self.device_info.open()?;
+        let interface = device.claim_interface(self.interface_number)?;
+        if self.alt_setting_number != 0 {
+            interface.set_alt_setting(self.alt_setting_number)?;
         }
+        Ok(CynthionHandle { interface })
+    }
+}
+
+impl CaptureDevice for CynthionDevice {
+    fn open_as_generic(&self) -> Result<Box<dyn CaptureHandle>, Error> {
+        Ok(Box::new(self.open()?))
+    }
+
+    fn supported_speeds(&self) -> &[Speed] {
+        &self.speeds
+    }
+}
+
+impl CaptureHandle for CynthionHandle {
+    fn begin_capture(
+        &mut self,
+        speed: Speed,
+        data_tx: mpsc::Sender<Vec<u8>>
+    ) -> Result<TransferQueue, Error>
+    {
+        self.start_capture(speed)?;
+
+        Ok(TransferQueue::new(&self.interface, data_tx,
+            ENDPOINT, NUM_TRANSFERS, READ_LEN))
+    }
+
+    fn end_capture(&mut self) -> Result<(), Error> {
+        self.stop_capture()
+    }
+
+    fn post_capture(&mut self) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn timestamped_packets(&self, data_rx: mpsc::Receiver<Vec<u8>>)
+        -> Box<dyn Iterator<Item=TimestampedPacket> + Send>
+    {
+        Box::new(
+            CynthionStream {
+                receiver: data_rx,
+                buffer: VecDeque::new(),
+                padding_due: false,
+                total_clk_cycles: 0,
+            }
+        )
+    }
+
+    fn duplicate(&self) -> Box<dyn CaptureHandle> {
+        Box::new(self.clone())
     }
 }
 
 impl CynthionHandle {
 
-    pub fn speeds(&self) -> Result<Vec<Speed>, Error> {
+    fn fetch_speeds(&self) -> Result<Vec<Speed>, Error> {
         use Speed::*;
         let control = Control {
             control_type: ControlType::Vendor,
@@ -251,81 +265,12 @@ impl CynthionHandle {
         Ok(speeds)
     }
 
-    pub fn start<F>(&self, speed: Speed, result_handler: F)
-        -> Result<(CynthionStream, BackendStop), Error>
-        where F: FnOnce(Result<(), Error>) + Send + 'static
-    {
-        // Channel to pass captured data to the decoder thread.
-        let (tx, rx) = mpsc::channel();
-        // Channel to stop the capture thread on request.
-        let (stop_tx, stop_rx) = oneshot::channel();
-        // Clone handle to give to the worker thread.
-        let handle = self.clone();
-        // Start worker thread.
-        let worker = spawn(move ||
-            result_handler(
-                handle.run_capture(speed, tx, stop_rx)));
-        Ok((
-            CynthionStream {
-                receiver: rx,
-                buffer: VecDeque::new(),
-                padding_due: false,
-                total_clk_cycles: 0,
-            },
-            BackendStop {
-                stop_request: stop_tx,
-                worker,
-            }
-        ))
-    }
-
-    fn run_capture(mut self,
-                   speed: Speed,
-                   tx: mpsc::Sender<Vec<u8>>,
-                   stop: oneshot::Receiver<()>)
-        -> Result<(), Error>
-    {
-        // Set up a separate channel pair to stop queue processing.
-        let (queue_stop_tx, queue_stop_rx) = oneshot::channel();
-
-        // Start capture.
-        self.start_capture(speed)?;
-
-        // Set up transfer queue.
-        let mut queue = CynthionQueue::new(&self.interface, tx);
-
-        // Spawn a worker thread to process queue until stopped.
-        let worker = spawn(move || block_on(queue.process(queue_stop_rx)));
-
-        // Wait until this thread is signalled to stop.
-        block_on(stop)
-            .context("Sender was dropped")?;
-
-        // Stop capture.
-        self.stop_capture()?;
-
-        // Leave queue worker running briefly to receive flushed data.
-        sleep(Duration::from_millis(100));
-
-        // Signal queue processing to stop, then join the worker thread.
-        queue_stop_tx.send(())
-            .or_else(|_| bail!("Failed sending stop signal to queue worker"))?;
-        handle_thread_panic(worker.join())?
-            .context("Error in queue worker thread")?;
-
-        Ok(())
-    }
-
-    fn start_capture(&mut self, speed: Speed) -> Result<(), Error> {
-        self.write_request(1, State::new(true, speed).0)?;
-        println!("Capture enabled, speed: {}", speed.description());
-        Ok(())
+    fn start_capture (&mut self, speed: Speed) -> Result<(), Error> {
+        self.write_request(1, State::new(true, speed).0)
     }
 
     fn stop_capture(&mut self) -> Result<(), Error> {
-        self.write_request(1, State::new(false, Speed::High).0)?;
-        println!("Capture disabled");
-        Ok(())
+        self.write_request(1, State::new(false, Speed::High).0)
     }
 
     pub fn configure_test_device(&mut self, speed: Option<Speed>)
@@ -353,62 +298,10 @@ impl CynthionHandle {
     }
 }
 
-impl CynthionQueue {
-
-    fn new(interface: &Interface, tx: mpsc::Sender<Vec<u8>>)
-        -> CynthionQueue
-    {
-        let mut queue = interface.bulk_in_queue(ENDPOINT);
-        while queue.pending() < NUM_TRANSFERS {
-            queue.submit(RequestBuffer::new(READ_LEN));
-        }
-        CynthionQueue { queue, tx }
-    }
-
-    async fn process(&mut self, mut stop: oneshot::Receiver<()>)
-        -> Result<(), Error>
-    {
-        use TransferError::Cancelled;
-        loop {
-            select_biased!(
-                _ = stop => {
-                    // Stop requested. Cancel all transfers.
-                    self.queue.cancel_all();
-                }
-                completion = self.queue.next_complete().fuse() => {
-                    match completion.status {
-                        Ok(()) => {
-                            // Send data to decoder thread.
-                            self.tx.send(completion.data)
-                                .context("Failed sending capture data to channel")?;
-                            if !stop.is_terminated() {
-                                // Submit next transfer.
-                                self.queue.submit(RequestBuffer::new(READ_LEN));
-                            }
-                        },
-                        Err(Cancelled) if stop.is_terminated() => {
-                            // Transfer cancelled during shutdown. Drop it.
-                            drop(completion);
-                            if self.queue.pending() == 0 {
-                                // All cancellations now handled.
-                                return Ok(());
-                            }
-                        },
-                        Err(usb_error) => {
-                            // Transfer failed.
-                            return Err(Error::from(usb_error));
-                        }
-                    }
-                }
-            );
-        }
-    }
-}
-
 impl Iterator for CynthionStream {
-    type Item = TracePacket;
+    type Item = TimestampedPacket;
 
-    fn next(&mut self) -> Option<TracePacket> {
+    fn next(&mut self) -> Option<TimestampedPacket> {
         loop {
             // Do we have another packet already in the buffer?
             match self.next_buffered_packet() {
@@ -427,7 +320,7 @@ impl Iterator for CynthionStream {
 }
 
 impl CynthionStream {
-    fn next_buffered_packet(&mut self) -> Option<TracePacket> {
+    fn next_buffered_packet(&mut self) -> Option<TimestampedPacket> {
         // Are we waiting for a padding byte?
         if self.padding_due {
             if self.buffer.is_empty() {
@@ -479,7 +372,7 @@ impl CynthionStream {
         }
 
         // Remove the rest of the packet from the buffer and return it.
-        Some(TracePacket {
+        Some(TimestampedPacket {
             timestamp_ns: clk_to_ns(self.total_clk_cycles),
             bytes: self.buffer.drain(0..packet_len).collect()
         })
@@ -492,5 +385,17 @@ impl CynthionStream {
 
         // Update our running total.
         self.total_clk_cycles += clk_cycles as u64;
+    }
+}
+
+impl Speed {
+    pub fn mask(&self) -> u8 {
+        use Speed::*;
+        match self {
+            Auto => 0b0001,
+            Low  => 0b0010,
+            Full => 0b0100,
+            High => 0b1000,
+        }
     }
 }

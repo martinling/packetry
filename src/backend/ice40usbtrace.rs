@@ -1,32 +1,32 @@
 use std::collections::VecDeque;
 use std::sync::mpsc;
-use std::thread::{sleep, spawn};
+use std::thread::sleep;
 use std::time::Duration;
 
-use anyhow::{bail, Context as ErrorContext, Error};
-use futures_channel::oneshot;
-use futures_lite::future::block_on;
-use futures_util::future::FusedFuture;
-use futures_util::{select_biased, FutureExt};
+use anyhow::{Context, Error};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use nusb::{
     self,
-    transfer::{Control, ControlType, Queue, Recipient, RequestBuffer, TransferError},
+    transfer::{Control, ControlType, Recipient},
     DeviceInfo, Interface,
 };
 
 use crate::usb::crc5;
 
-use super::DeviceUsability::*;
-use super::{handle_thread_panic, BackendStop, DeviceUsability, InterfaceSelection, Speed, TracePacket};
+use super::{
+    CaptureDevice,
+    CaptureHandle,
+    Speed,
+    TimestampedPacket,
+    TransferQueue,
+};
 
-const VID: u16 = 0x1d50;
-const PID: u16 = 0x617e;
-
+pub const VID_PID: (u16, u16) = (0x1d50, 0x617e);
+const INTERFACE: u8 = 1;
 const ENDPOINT: u8 = 0x81;
-
 const READ_LEN: usize = 1024;
 const NUM_TRANSFERS: usize = 4;
+const SPEEDS: [Speed; 1] = [Speed::Full];
 
 #[derive(Debug, Clone, Copy, IntoPrimitive)]
 #[repr(u8)]
@@ -38,33 +38,30 @@ enum Command {
     BufferFlush = 0x21,
 }
 
-/// A ICE40usbtrace device attached to the system.
+/// A iCE40-usbtrace device attached to the system.
 pub struct Ice40UsbtraceDevice {
     pub device_info: DeviceInfo,
-    pub usability: DeviceUsability,
 }
 
-/// A handle to an open ICE40usbtrace.
+/// A handle to an open iCE40-usbtrace device.
 #[derive(Clone)]
 pub struct Ice40UsbtraceHandle {
     interface: Interface,
 }
 
-pub struct Ice40UsbtraceQueue {
-    tx: mpsc::Sender<Vec<u8>>,
-    queue: Queue<RequestBuffer>,
-}
-
-pub struct Ice40UsbStream {
+/// Converts from received data bytes to timestamped packets.
+pub struct Ice40UsbtraceStream {
     receiver: mpsc::Receiver<Vec<u8>>,
     buffer: VecDeque<u8>,
     ts: u64,
 }
 
-/// Check whether a ICE40usbtrace device has an accessible analyzer interface.
-fn check_device(device_info: &DeviceInfo) -> Result<(), Error> {
+/// Probe an iCE40-usbtrace device.
+pub fn probe(device_info: DeviceInfo) -> Result<Box<dyn CaptureDevice>, Error> {
     // Check we can open the device.
-    let device = device_info.open().context("Failed to open device")?;
+    let device = device_info
+        .open()
+        .context("Failed to open device")?;
 
     // Read the active configuration.
     let _config = device
@@ -72,140 +69,91 @@ fn check_device(device_info: &DeviceInfo) -> Result<(), Error> {
         .context("Failed to retrieve active configuration")?;
 
     // Try to claim the interface.
-    let _interface = device.claim_interface(1).context("Failed to claim interface")?;
+    let _interface = device
+        .claim_interface(INTERFACE)
+        .context("Failed to claim interface")?;
 
     // Now we have a usable device.
-    Ok(())
+    Ok(Box::new(Ice40UsbtraceDevice { device_info }))
 }
 
-impl Ice40UsbtraceDevice {
-    pub fn scan() -> Result<Vec<Ice40UsbtraceDevice>, Error> {
-        Ok(nusb::list_devices()?
-            .filter(|info| info.vendor_id() == VID)
-            .filter(|info| info.product_id() == PID)
-            .map(|device_info| match check_device(&device_info) {
-                Ok(()) => Ice40UsbtraceDevice {
-                    device_info,
-                    usability: Usable(
-                        InterfaceSelection {
-                            interface_number: 1,
-                            alt_setting_number: 0,
-                        },
-                        vec![Speed::Full],
-                    ),
-                },
-                Err(err) => Ice40UsbtraceDevice {
-                    device_info,
-                    usability: Unusable(format!("{}", err)),
-                },
-            })
-            .collect())
+impl CaptureDevice for Ice40UsbtraceDevice {
+    fn open_as_generic(&self) -> Result<Box<dyn CaptureHandle>, Error> {
+        let device = self.device_info.open()?;
+        let interface = device.claim_interface(INTERFACE)?;
+        Ok(Box::new(Ice40UsbtraceHandle { interface }))
     }
 
-    pub fn open(&self) -> Result<Ice40UsbtraceHandle, Error> {
-        match &self.usability {
-            Usable(iface, _) => {
-                let device = self.device_info.open()?;
-                let interface = device.claim_interface(iface.interface_number)?;
-                if iface.alt_setting_number != 0 {
-                    interface.set_alt_setting(iface.alt_setting_number)?;
-                }
-                Ok(Ice40UsbtraceHandle { interface })
-            }
-            Unusable(reason) => bail!("Device not usable: {}", reason),
-        }
+    fn supported_speeds(&self) -> &[Speed] {
+        &SPEEDS
     }
 }
 
-impl Ice40UsbtraceHandle {
-    pub fn start<F>(&self, speed: Speed, result_handler: F) -> Result<(Ice40UsbStream, BackendStop), Error>
-    where
-        F: FnOnce(Result<(), Error>) + Send + 'static,
-    {
-        // Channel to pass captured data to the decoder thread.
-        let (tx, rx) = mpsc::channel();
-        // Channel to stop the capture thread on request.
-        let (stop_tx, stop_rx) = oneshot::channel();
-        // Clone handle to give to the worker thread.
-        let handle = self.clone();
-        // Start worker thread.
-        let worker = spawn(move || result_handler(handle.run_capture(speed, tx, stop_rx)));
-        Ok((
-            Ice40UsbStream {
-                receiver: rx,
-                buffer: VecDeque::new(),
-                ts: 0,
-            },
-            BackendStop {
-                stop_request: stop_tx,
-                worker,
-            },
-        ))
-    }
+impl CaptureHandle for Ice40UsbtraceHandle {
 
-    fn run_capture(
-        mut self,
+    fn begin_capture(
+        &mut self,
         speed: Speed,
-        tx: mpsc::Sender<Vec<u8>>,
-        stop: oneshot::Receiver<()>,
-    ) -> Result<(), Error> {
-        // Set up a separate channel pair to stop queue processing.
-        let (queue_stop_tx, queue_stop_rx) = oneshot::channel();
+        data_tx: mpsc::Sender<Vec<u8>>
+    ) -> Result<TransferQueue, Error> {
+        // iCE40-usbtrace only supports full-speed captures
+        assert_eq!(speed, Speed::Full);
 
-        // Stop the ICE40usbtrace was left running before and ignore any errors
+        // Stop the device if it was left running before and ignore any errors
         let _ = self.stop_capture();
-        // Leave queue worker running briefly to receive flushed data.
         sleep(Duration::from_millis(100));
         let _ = self.flush_buffer();
-
-        // ICE40usbtrace only supports full-speed captures
-        assert_eq!(speed, Speed::Full);
 
         // Start capture.
         self.start_capture()?;
 
         // Set up transfer queue.
-        let mut queue = Ice40UsbtraceQueue::new(&self.interface, tx);
+        Ok(TransferQueue::new(&self.interface, data_tx,
+            ENDPOINT, NUM_TRANSFERS, READ_LEN))
+    }
 
-        // Spawn a worker thread to process queue until stopped.
-        let worker = spawn(move || block_on(queue.process(queue_stop_rx)));
-
-        // Wait until this thread is signalled to stop.
-        block_on(stop).context("Sender was dropped")?;
-
-        // Stop capture.
+    fn end_capture(&mut self) -> Result<(), Error> {
+        // Stop the capture.
         self.stop_capture()?;
 
-        // Leave queue worker running briefly to receive flushed data.
+        // Leave running briefly to receive flushed data.
         sleep(Duration::from_millis(100));
-
-        // Signal queue processing to stop, then join the worker thread.
-        queue_stop_tx
-            .send(())
-            .or_else(|_| bail!("Failed sending stop signal to queue worker"))?;
-        handle_thread_panic(worker.join())?.context("Error in queue worker thread")?;
-
-        self.flush_buffer()?;
 
         Ok(())
     }
 
+    fn post_capture(&mut self) -> Result<(), Error> {
+        self.flush_buffer()
+    }
+
+    fn timestamped_packets(&self, data_rx: mpsc::Receiver<Vec<u8>>)
+        -> Box<dyn Iterator<Item=TimestampedPacket> + Send> {
+        Box::new(
+            Ice40UsbtraceStream {
+                receiver: data_rx,
+                buffer: VecDeque::new(),
+                ts: 0,
+            }
+        )
+    }
+
+    fn duplicate(&self) -> Box<dyn CaptureHandle> {
+        Box::new(self.clone())
+    }
+}
+
+impl Ice40UsbtraceHandle {
+
     fn start_capture(&mut self) -> Result<(), Error> {
-        self.write_request(Command::CaptureStart)?;
-        //println!("Capture enabled, speed: {}", speed.description());
-        Ok(())
+        self.write_request(Command::CaptureStart)
     }
 
     fn stop_capture(&mut self) -> Result<(), Error> {
-        self.write_request(Command::CaptureStop)?;
-        println!("Capture disabled");
-        Ok(())
+        self.write_request(Command::CaptureStop)
     }
 
     fn flush_buffer(&mut self) -> Result<(), Error> {
-        self.write_request(Command::BufferFlush)?;
-        println!("Buffer flushed");
-        Ok(())
+        self.write_request(Command::BufferFlush)
     }
 
     fn write_request(&mut self, request: Command) -> Result<(), Error> {
@@ -225,57 +173,10 @@ impl Ice40UsbtraceHandle {
     }
 }
 
-impl Ice40UsbtraceQueue {
-    fn new(interface: &Interface, tx: mpsc::Sender<Vec<u8>>) -> Ice40UsbtraceQueue {
-        let mut queue = interface.bulk_in_queue(ENDPOINT);
-        while queue.pending() < NUM_TRANSFERS {
-            queue.submit(RequestBuffer::new(READ_LEN));
-        }
-        Ice40UsbtraceQueue { queue, tx }
-    }
+impl Iterator for Ice40UsbtraceStream {
+    type Item = TimestampedPacket;
 
-    async fn process(&mut self, mut stop: oneshot::Receiver<()>) -> Result<(), Error> {
-        use TransferError::Cancelled;
-        loop {
-            select_biased!(
-                _ = stop => {
-                    // Stop requested. Cancel all transfers.
-                    self.queue.cancel_all();
-                }
-                completion = self.queue.next_complete().fuse() => {
-                    match completion.status {
-                        Ok(()) => {
-                            // Send data to decoder thread.
-                            self.tx.send(completion.data)
-                                .context("Failed sending capture data to channel")?;
-                            if !stop.is_terminated() {
-                                // Submit next transfer.
-                                self.queue.submit(RequestBuffer::new(READ_LEN));
-                            }
-                        },
-                        Err(Cancelled) if stop.is_terminated() => {
-                            // Transfer cancelled during shutdown. Drop it.
-                            drop(completion);
-                            if self.queue.pending() == 0 {
-                                // All cancellations now handled.
-                                return Ok(());
-                            }
-                        },
-                        Err(usb_error) => {
-                            // Transfer failed.
-                            return Err(Error::from(usb_error));
-                        }
-                    }
-                }
-            );
-        }
-    }
-}
-
-impl Iterator for Ice40UsbStream {
-    type Item = TracePacket;
-
-    fn next(&mut self) -> Option<TracePacket> {
+    fn next(&mut self) -> Option<TimestampedPacket> {
         loop {
             // Do we have another packet already in the buffer?
             match self.next_buffered_packet() {
@@ -347,7 +248,7 @@ impl std::fmt::Display for Pid {
     }
 }
 
-impl Ice40UsbStream {
+impl Ice40UsbtraceStream {
     fn ns(&self) -> u64 {
         // 24MHz clock, a tick is 41.666...ns
         const TABLE: [u64; 3] = [0, 41, 83];
@@ -356,7 +257,7 @@ impl Ice40UsbStream {
         quotient * 125 + TABLE[remainder as usize]
     }
 
-    fn parse_packet(&mut self) -> ParseResult<TracePacket> {
+    fn parse_packet(&mut self) -> ParseResult<TimestampedPacket> {
         let header: Vec<u8> = self.buffer.drain(0..4).collect();
         let header = Header(&header);
 
@@ -385,7 +286,7 @@ impl Ice40UsbStream {
                     return ParseResult::NeedMoreData;
                 }
                 bytes.extend(self.buffer.drain(0..data_len));
-                ParseResult::Parsed(TracePacket {
+                ParseResult::Parsed(TimestampedPacket {
                     timestamp_ns: self.ns(),
                     bytes,
                 })
@@ -402,7 +303,7 @@ impl Ice40UsbStream {
                 }
                 bytes.extend(data);
 
-                ParseResult::Parsed(TracePacket {
+                ParseResult::Parsed(TimestampedPacket {
                     timestamp_ns: self.ns(),
                     bytes,
                 })
@@ -410,7 +311,7 @@ impl Ice40UsbStream {
             (Ok(Pid::Ack | Pid::Nak | Pid::Stall), data_ok) => {
                 assert!(data_ok, "PID is all there is to decode!");
                 let bytes = vec![header.pid_byte()];
-                ParseResult::Parsed(TracePacket {
+                ParseResult::Parsed(TimestampedPacket {
                     timestamp_ns: self.ns(),
                     bytes,
                 })
@@ -424,7 +325,7 @@ impl Ice40UsbStream {
         pkt
     }
 
-    fn next_buffered_packet(&mut self) -> Option<TracePacket> {
+    fn next_buffered_packet(&mut self) -> Option<TimestampedPacket> {
         loop {
             // Need more bytes for the header
             if self.buffer.len() < 4 {
