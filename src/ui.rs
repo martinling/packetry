@@ -692,7 +692,7 @@ fn create_view<Item, Model, RowData, ViewMode>(
                 let node = node_ref.borrow();
                 let item = node.item.clone();
                 let summary = model.description(&item, false);
-                let connectors = model.connectors(&item);
+                let connectors = model.connectors(&item, expander.is_expanded());
                 item_widget.set_text(summary);
                 item_widget.set_connectors(connectors);
                 expander.set_visible(node.expandable());
@@ -700,8 +700,12 @@ fn create_view<Item, Model, RowData, ViewMode>(
                 #[cfg(any(test,
                           feature="record-ui-test"))]
                 let recording = expand_rec.clone();
+                let item_2 = item.clone();
                 let handler = expander.connect_expanded_notify(
-                    clone!(@strong model, @strong node_ref, @strong list_item =>
+                    clone!(@strong model,
+                           @strong node_ref,
+                           @strong list_item,
+                           @strong item_widget =>
                         move |expander| {
                             let position = list_item.position();
                             let expanded = expander.is_expanded();
@@ -709,6 +713,8 @@ fn create_view<Item, Model, RowData, ViewMode>(
                                       feature="record-ui-test"))]
                             recording.borrow_mut().log_item_expanded(
                                 name, position, expanded);
+                            let connectors = model.connectors(&item_2, expanded);
+                            item_widget.set_connectors(connectors);
                             display_error(
                                 model.set_expanded(&node_ref, position, expanded))
                         }

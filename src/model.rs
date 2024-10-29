@@ -51,7 +51,7 @@ pub trait GenericModel<Item, ViewMode> where Self: Sized {
     fn timestamp(&self, item: &Item) -> u64;
 
     /// Fetch the connecting lines for a given item.
-    fn connectors(&self, item: &Item) -> String;
+    fn connectors(&self, item: &Item, expanded: bool) -> String;
 }
 
 /// Define the outer type exposed to our Rust code.
@@ -111,10 +111,10 @@ macro_rules! model {
                 tree.timestamp(item)
             }
 
-            fn connectors(&self, item: &$item) -> String {
+            fn connectors(&self, item: &$item, expanded: bool) -> String {
                 let tree_opt = self.imp().tree.borrow();
                 let tree = tree_opt.as_ref().unwrap();
-                tree.connectors(item)
+                tree.connectors(item, expanded)
             }
         }
     }

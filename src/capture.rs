@@ -1427,7 +1427,8 @@ pub trait ItemSource<Item, ViewMode> {
         -> Result<String, Error>;
     fn connectors(&mut self,
                   view_mode: ViewMode,
-                  item: &Item)
+                  item: &Item,
+                  expanded: bool)
         -> Result<String, Error>;
     fn timestamp(&mut self, item: &Item) -> Result<Timestamp, Error>;
 }
@@ -1804,9 +1805,12 @@ impl ItemSource<TrafficItem, TrafficViewMode> for CaptureReader {
         })
     }
 
-    fn connectors(&mut self, view_mode: TrafficViewMode, item: &TrafficItem)
-        -> Result<String, Error>
-    {
+    fn connectors(
+        &mut self,
+        view_mode: TrafficViewMode,
+        item: &TrafficItem,
+        expanded: bool,
+    ) -> Result<String, Error> {
         use EndpointState::*;
         use TrafficItem::*;
         use TrafficViewMode::*;
@@ -1821,15 +1825,16 @@ impl ItemSource<TrafficItem, TrafficViewMode> for CaptureReader {
             }, _ => false
         };
         if view_mode == Transactions {
-            return Ok(String::from(match (item, last_packet) {
-                (TransactionGroup(_), _) => unreachable!(),
-                (Transaction(..), _)     => "○",
-                (Packet(..), false)      => "├──",
-                (Packet(..), true )      => "└──",
+            return Ok(String::from(match (item, last_packet, expanded) {
+                (TransactionGroup(_), ..  ) => unreachable!(),
+                (Transaction(..), _, false) => "○",
+                (Transaction(..), _, true ) => "╭",
+                (Packet(..), false, _)      => "├──",
+                (Packet(..), true,  _)      => "╰──",
             }));
         }
         let endpoint_count = self.endpoints.len() as usize;
-        let max_string_length = endpoint_count + "    └──".len();
+        let max_string_length = endpoint_count + "    ╰──".len();
         let mut connectors = String::with_capacity(max_string_length);
         let group_id = match item {
             TransactionGroup(i) |
@@ -1865,13 +1870,14 @@ impl ItemSource<TrafficItem, TrafficViewMode> for CaptureReader {
             };
             connectors.push(match item {
                 TransactionGroup(..) => {
-                    match (state, thru) {
-                        (Idle,     false) => ' ',
-                        (Idle,     true ) => '─',
-                        (Starting, _    ) => '○',
-                        (Ongoing,  false) => '│',
-                        (Ongoing,  true ) => '┼',
-                        (Ending,   _    ) => '└',
+                    match (state, thru, expanded) {
+                        (Idle,     false, _    ) => ' ',
+                        (Idle,     true,  _    ) => '─',
+                        (Starting, _,     false) => '○',
+                        (Starting, _,     true ) => '╭',
+                        (Ongoing,  false, _    ) => '│',
+                        (Ongoing,  true,  _    ) => '┼',
+                        (Ending,   _,     _    ) => '╰',
                     }
                 },
                 Transaction(..) => {
@@ -1881,7 +1887,7 @@ impl ItemSource<TrafficItem, TrafficViewMode> for CaptureReader {
                         (false, true,  false, _    ) => '│',
                         (false, true,  true,  _    ) => '┼',
                         (true,  _,     _,     false) => '├',
-                        (true,  _,     _,     true ) => '└',
+                        (true,  _,     _,     true ) => '╰',
                     }
                 },
                 Packet(..) => {
@@ -1908,7 +1914,7 @@ impl ItemSource<TrafficItem, TrafficViewMode> for CaptureReader {
                 (TransactionGroup(_), _)                     => "──□ ",
                 (Transaction(..), _)                         => "───",
                 (Packet(..), false)                          => "    ├──",
-                (Packet(..), true)                           => "    └──",
+                (Packet(..), true)                           => "    ╰──",
             }
         );
         Ok(connectors)
@@ -2268,7 +2274,7 @@ impl ItemSource<DeviceItem, DeviceViewMode> for CaptureReader {
         })
     }
 
-    fn connectors(&mut self, _view_mode: (), item: &DeviceItem)
+    fn connectors(&mut self, _view_mode: (), item: &DeviceItem, _expanded: bool)
         -> Result<String, Error>
     {
         Ok("   ".repeat(item.indent as usize))
