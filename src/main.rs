@@ -48,6 +48,8 @@ mod test_replay;
 use gtk::prelude::*;
 use gtk::gio::ApplicationFlags;
 use gtk::glib::{self, OptionArg, OptionFlags};
+use gtk::CssProvider;
+use gtk::gdk::Display;
 
 use ui::{
     activate,
@@ -59,6 +61,32 @@ use version::{version, version_info};
 
 fn have_argument(name: &str) -> bool {
     std::env::args().any(|arg| arg == name)
+}
+
+fn load_css() {
+    use std::fs::File;
+
+    // HACK: The font and CSS markup should be packaged as
+    // application resources.
+
+    let provider = CssProvider::new();
+    provider.load_from_data(r#"
+        * {
+            font-family: "Terminus";
+        }
+
+        conn_label {
+            font-size: 24px;
+            margin-top: -3pt;
+            margin-bottom: -3pt;
+        }
+    "#);
+
+    gtk::style_context_add_provider_for_display(
+        &Display::default().expect("Could not connect to a display."),
+        &provider,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
 }
 
 fn main() {
@@ -104,6 +132,7 @@ fn main() {
             "test-cynthion", glib::Char::from(0),
             OptionFlags::NONE, OptionArg::None,
             "Test an attached Cynthion USB analyzer", None);
+        application.connect_startup(|_| load_css());
         application.connect_activate(|app| display_error(activate(app)));
         application.connect_open(|app, files, _hint| {
             app.activate();

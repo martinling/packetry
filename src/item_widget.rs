@@ -59,7 +59,10 @@ impl ItemWidget {
             Label::builder()
                 .ellipsize(EllipsizeMode::End)
                 .build());
-        wrapper.imp().conn_label.replace(Label::new(None));
+        wrapper.imp().conn_label.replace(
+            Label::builder()
+                .css_name("conn_label")
+                .build());
         wrapper.imp().expander.replace(Expander::new(None));
         wrapper.append(&wrapper.imp().conn_label.borrow().clone());
         wrapper.append(&wrapper.imp().expander.borrow().clone());
@@ -91,8 +94,7 @@ impl ItemWidget {
 
     /// Set the connecting lines on this widget.
     pub fn set_connectors(&self, connectors: String) {
-        self.imp().conn_label.borrow_mut().set_markup(
-                format!("<tt>{connectors}</tt>").as_str());
+        self.imp().conn_label.borrow_mut().set_text(&connectors);
     }
 
     /// Set the function to build the context menu for this widget.
