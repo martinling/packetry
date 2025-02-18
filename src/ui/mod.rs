@@ -55,8 +55,8 @@ use gtk::{
     ResponseType,
     ScrolledWindow,
     Separator,
+    SelectionModel,
     SignalListItemFactory,
-    SingleSelection,
     Stack,
     StackSwitcher,
     StringList,
@@ -698,11 +698,12 @@ fn create_view<Item, Model, RowData, ViewMode>(
         context_menu_fn: ContextFn<Item>,
         #[cfg(any(test, feature="record-ui-test"))]
         recording_args: (&Rc<RefCell<Recording>>, &'static str))
-    -> (Model, SingleSelection, ColumnView)
+    -> (Model, ColumnView)
     where
         Item: Clone + Debug + PartialOrd + 'static,
         ViewMode: Copy,
-        Model: GenericModel<Item, ViewMode> + IsA<ListModel> + IsA<Object>,
+        Model: GenericModel<Item, ViewMode> +
+            IsA<ListModel> + IsA<SelectionModel> + IsA<Object>,
         RowData: GenericRowData<Item> + IsA<Object>,
         CaptureReader: ItemSource<Item, ViewMode>,
         Object: ToGenericRowData<Item>
@@ -724,7 +725,6 @@ fn create_view<Item, Model, RowData, ViewMode>(
                         .log_item_updated(name, position, summary)
             )
         )).expect("Failed to create model");
-    let selection_model = SingleSelection::new(Some(model.clone()));
     let factory = SignalListItemFactory::new();
     factory.connect_setup(move |_, list_item| {
         let widget = ItemWidget::new();
@@ -823,7 +823,7 @@ fn create_view<Item, Model, RowData, ViewMode>(
     factory.connect_bind(move |_, item| display_error(bind(item)));
     factory.connect_unbind(move |_, item| display_error(unbind(item)));
 
-    let view = ColumnView::new(Some(selection_model.clone()));
+    let view = ColumnView::new(Some(model.clone()));
     let column = ColumnViewColumn::new(Some(title), Some(factory));
     view.append_column(&column);
     view.add_css_class("data-table");
@@ -873,14 +873,14 @@ fn create_view<Item, Model, RowData, ViewMode>(
         changed_rec.borrow_mut().log_items_changed(
             name, model, position, removed, added));
 
-    (model, selection_model, view)
+    (model, view)
 }
 
 pub fn reset_capture() -> Result<CaptureWriter, Error> {
     let (writer, reader) = create_capture()?;
     with_ui(|ui| {
         for mode in TRAFFIC_MODES {
-            let (traffic_model, traffic_selection, traffic_view) =
+            let (traffic_model, traffic_view) =
                 create_view::<
                     TrafficItem,
                     TrafficModel,
@@ -896,23 +896,11 @@ pub fn reset_capture() -> Result<CaptureWriter, Error> {
                 );
             ui.traffic_windows[&mode].set_child(Some(&traffic_view));
             ui.traffic_models.insert(mode, traffic_model.clone());
-            traffic_selection.connect_selection_changed(
+            traffic_model.clone().connect_selection_changed(
                 move |selection_model, _position, _n_items| {
                     display_error(with_ui(|ui| {
                         let text = match selection_model.selected_item() {
-                            Some(item) => {
-                                let row = item
-                                    .downcast::<TrafficRowData>()
-                                    .or_else(|_|
-                                        bail!("Item is not TrafficRowData"))?;
-                                match row.node() {
-                                    Ok(node_ref) => {
-                                        let node = node_ref.borrow();
-                                        traffic_model.description(&node.item, true)
-                                    },
-                                    Err(msg) => msg
-                                }
-                            },
+                            Some(item) => traffic_model.description(&item, true),
                             None => String::from("No item selected"),
                         };
                         ui.detail_text.set_text(&text);
@@ -921,7 +909,7 @@ pub fn reset_capture() -> Result<CaptureWriter, Error> {
                 }
             );
         }
-        let (device_model, _device_selection, device_view) =
+        let (device_model, device_view) =
             create_view::<
                 DeviceItem,
                 DeviceModel,
