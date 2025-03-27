@@ -5,6 +5,8 @@ use std::fmt::{Debug, Write};
 use std::iter::once;
 use std::num::NonZeroU32;
 use std::ops::Range;
+use std::path::Path;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
 use std::sync::atomic::Ordering::{Acquire, Release};
 use std::sync::Arc;
@@ -22,6 +24,7 @@ use crate::database::{
 };
 use crate::usb::{self, prelude::*};
 use crate::util::{
+    dump::{Dump, restore},
     id::Id,
     rcu::SingleWriterRcu,
     vec_map::{Key, VecMap},
@@ -1283,6 +1286,248 @@ impl EndpointReader {
             self.data_byte_counts.get(range.end)?
         };
         Ok(last_byte_count - first_byte_count)
+    }
+}
+
+impl Dump for CaptureReader {
+    fn dump(&self, dest: &Path) -> Result<(), Error> {
+        let _ = std::fs::remove_dir_all(dest);
+        std::fs::create_dir_all(dest)?;
+        self.packet_data.dump(&dest.join("packet_data"))?;
+        self.packet_index.dump(&dest.join("packet_index"))?;
+        self.packet_times.dump(&dest.join("packet_times"))?;
+        self.transaction_index.dump(&dest.join("transaction_index"))?;
+        self.group_index.dump(&dest.join("group_index"))?;
+        self.item_index.dump(&dest.join("item_index"))?;
+        self.devices.dump(&dest.join("devices"))?;
+        self.endpoints.dump(&dest.join("endpoints"))?;
+        self.endpoint_states.dump(&dest.join("endpoint_states"))?;
+        self.endpoint_state_index.dump(&dest.join("endpoint_state_index"))?;
+        self.end_index.dump(&dest.join("end_index"))?;
+        for (i, ep_traf) in self.shared.endpoint_readers.load().iter_pairs() {
+            ep_traf.as_ref().dump(&dest.join(format!("endpoint-{i}")))?;
+        }
+        for (i, dev_data) in self.shared.device_data.load().iter_pairs() {
+            dev_data.as_ref().dump(&dest.join(format!("device-{i}")))?;
+        }
+        Ok(())
+    }
+
+    fn restore(src: &Path) -> Result<Self, Error> {
+        let mut endpoint_readers = VecMap::<EndpointId, EndpointReader>::new();
+        for i in 0.. {
+            match restore(&src.join(format!("endpoint-{i}")))? {
+                Some(reader) => { endpoint_readers.push(reader); }
+                None => break,
+            }
+        }
+        Ok(CaptureReader {
+            shared: Arc::new(CaptureShared {
+                metadata: ArcSwap::new(Arc::new(CaptureMetadata::default())),
+                device_data: ArcSwap::new(Arc::new({
+                    let mut map = VecMap::new();
+                    for i in 0.. {
+                        match restore(&src.join(format!("device-{i}")))? {
+                            Some(dev_data) => { map.push(Arc::new(dev_data)); },
+                            None => break,
+                        }
+                    }
+                    map
+                })),
+                endpoint_index: ArcSwap::new(Arc::new(VecMap::new())),
+                endpoint_readers: ArcSwap::new(Arc::new({
+                    let mut map = VecMap::new();
+                    for reader in endpoint_readers.into_iter() {
+                        map.push(Arc::new(reader.clone()));
+                    }
+                    map
+                })),
+                complete: AtomicBool::from(false),
+            }),
+            endpoint_readers,
+            packet_data: restore(&src.join("packet_data"))?,
+            packet_index: restore(&src.join("packet_index"))?,
+            packet_times: restore(&src.join("packet_times"))?,
+            transaction_index: restore(&src.join("transaction_index"))?,
+            group_index: restore(&src.join("group_index"))?,
+            item_index: restore(&src.join("item_index"))?,
+            devices: restore(&src.join("devices"))?,
+            endpoints: restore(&src.join("endpoints"))?,
+            endpoint_states: restore(&src.join("endpoint_states"))?,
+            endpoint_state_index: restore(&src.join("endpoint_state_index"))?,
+            end_index: restore(&src.join("end_index"))?,
+        })
+    }
+}
+
+impl Dump for EndpointReader {
+    fn dump(&self, dest: &Path) -> Result<(), Error> {
+        std::fs::create_dir_all(dest)?;
+        self.shared.total_data.dump(&dest.join("total_data"))?;
+        self.shared.first_item_id.dump(&dest.join("first_item_id"))?;
+        self.transaction_ids.dump(&dest.join("transaction_ids"))?;
+        self.group_index.dump(&dest.join("group_index"))?;
+        self.data_transactions.dump(&dest.join("data_transactions"))?;
+        self.data_byte_counts.dump(&dest.join("data_byte_counts"))?;
+        self.end_index.dump(&dest.join("end_index"))?;
+        Ok(())
+    }
+
+    fn restore(src: &Path) -> Result<Self, Error> {
+        Ok(EndpointReader {
+            shared: Arc::new(
+                EndpointShared {
+                    total_data: restore(&src.join("total_data"))?,
+                    first_item_id: restore(&src.join("first_item_id"))?,
+                }
+            ),
+            transaction_ids: restore(&src.join("transaction_ids"))?,
+            group_index: restore(&src.join("group_index"))?,
+            data_transactions: restore(&src.join("data_transactions"))?,
+            data_byte_counts: restore(&src.join("data_byte_counts"))?,
+            end_index: restore(&src.join("end_index"))?,
+        })
+    }
+}
+
+impl Dump for DeviceData {
+    fn dump(&self, dest: &Path) -> Result<(), Error> {
+        std::fs::create_dir_all(dest)?;
+        self.device_descriptor.dump(&dest.join("device_descriptor"))?;
+        self.configurations.dump(&dest.join("configurations"))?;
+        self.config_number.dump(&dest.join("config_number"))?;
+        self.interface_settings.dump(&dest.join("interface_settings"))?;
+        self.endpoint_details.dump(&dest.join("endpoint_details"))?;
+        self.strings.dump(&dest.join("strings"))?;
+        self.version.dump(&dest.join("version"))?;
+        Ok(())
+    }
+
+    fn restore(src: &Path) -> Result<Self, Error> {
+        Ok(DeviceData {
+            device_descriptor: restore(&src.join("device_descriptor"))?,
+            configurations: restore(&src.join("configurations"))?,
+            config_number: restore(&src.join("config_number"))?,
+            interface_settings: restore(&src.join("interface_settings"))?,
+            endpoint_details: restore(&src.join("endpoint_details"))?,
+            strings: restore(&src.join("strings"))?,
+            version: restore(&src.join("version"))?,
+        })
+    }
+}
+
+impl Dump for VecMap<ConfigNum, Arc<Configuration>> {
+    fn dump(&self, dest: &Path) -> Result<(), Error> {
+        std::fs::create_dir_all(dest)?;
+        for (num, config) in self.iter_pairs() {
+            let num_path = dest.join(format!("{}", num.0));
+            config.dump(&num_path)?;
+        }
+        Ok(())
+    }
+
+    fn restore(src: &Path) -> Result<Self, Error> {
+        let mut map = VecMap::new();
+        for dir_entry in std::fs::read_dir(src)? {
+            let num_os_str = dir_entry?.file_name();
+            let num_str = num_os_str.to_string_lossy();
+            let num = ConfigNum::from(u8::from_str(&num_str)?);
+            let config = restore(&src.join(num_os_str))?;
+            map.set(num, config);
+        }
+        Ok(map)
+    }
+
+}
+
+impl Dump for VecMap<InterfaceNum, InterfaceAlt> {
+    fn dump(&self, dest: &Path) -> Result<(), Error> {
+        std::fs::create_dir_all(dest)?;
+        for (num, alt) in self.iter_pairs() {
+            let num_path = dest.join(format!("{}", num.0));
+            alt.dump(&num_path)?;
+        }
+        Ok(())
+    }
+
+    fn restore(src: &Path) -> Result<Self, Error> {
+        let mut map = VecMap::new();
+        for dir_entry in std::fs::read_dir(src)? {
+            let num_os_str = dir_entry?.file_name();
+            let num_str = num_os_str.to_string_lossy();
+            let num = InterfaceNum::from(u8::from_str(&num_str)?);
+            let alt = restore(&src.join(num_os_str))?;
+            map.set(num, alt);
+        }
+        Ok(map)
+    }
+}
+
+impl Dump for VecMap<EndpointAddr, EndpointDetails> {
+    fn dump(&self, dest: &Path) -> Result<(), Error> {
+        std::fs::create_dir_all(dest)?;
+        for (addr, details) in self.iter_pairs() {
+            let addr_dir = dest.join(format!("0x{:02X}", addr.0));
+            std::fs::create_dir_all(&addr_dir)?;
+            details.dump(&addr_dir)?;
+        }
+        Ok(())
+    }
+
+    fn restore(src: &Path) -> Result<Self, Error> {
+        let mut map = VecMap::new();
+        for dir_entry in std::fs::read_dir(src)? {
+            let addr_os_str = dir_entry?.file_name();
+            if let Some(addr_hex) = addr_os_str
+                .to_string_lossy()
+                .strip_prefix("0x")
+            {
+                let addr = EndpointAddr::from(u8::from_str_radix(addr_hex, 16)?);
+                let details = EndpointDetails::restore(&src.join(addr_os_str))?;
+                map.set(addr, details);
+            }
+        }
+        Ok(map)
+    }
+}
+
+impl Dump for EndpointDetails {
+    fn dump(&self, dest: &Path) -> Result<(), Error> {
+        std::fs::create_dir_all(dest)?;
+        let (endpoint_type, max_packet_size) = self;
+        endpoint_type.dump(&dest.join("endpoint_type"))?;
+        max_packet_size.dump(&dest.join("max_packet_size"))?;
+        Ok(())
+    }
+
+    fn restore(src: &Path) -> Result<Self, Error> {
+        Ok((
+           restore(&src.join("endpoint_type"))?,
+           restore(&src.join("max_packet_size"))?,
+        ))
+    }
+}
+
+impl Dump for VecMap<StringId, UTF16ByteVec> {
+    fn dump(&self, dest: &Path) -> Result<(), Error> {
+        std::fs::create_dir_all(dest)?;
+        for (id, string) in self.iter_pairs() {
+            let id_path = dest.join(format!("{}", id.0));
+            string.dump(&id_path)?;
+        }
+        Ok(())
+    }
+
+    fn restore(src: &Path) -> Result<Self, Error> {
+        let mut map = VecMap::new();
+        for dir_entry in std::fs::read_dir(src)? {
+            let id_os_str = dir_entry?.file_name();
+            let id_str = id_os_str.to_string_lossy();
+            let id = StringId::from(u8::from_str(&id_str)?);
+            let string = restore(&src.join(id_os_str))?;
+            map.set(id, string);
+        }
+        Ok(map)
     }
 }
 
