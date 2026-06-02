@@ -37,11 +37,15 @@ mod version;
 const GTK_REQUIRED: (u32, u32, u32) = (4,12,0);
 
 use std::ops::ControlFlow;
+use std::path::PathBuf;
 
+use anyhow::Error;
 use gtk::{prelude::*, Application, ApplicationWindow, Label, Button, Orientation};
 use gtk::gio::ApplicationFlags;
 use gtk::glib::{self, clone, OptionArg, OptionFlags, ExitCode};
 
+use capture::CaptureReader;
+use database::CounterSet;
 use testing::test_cynthion;
 use ui::{
     activate,
@@ -50,6 +54,7 @@ use ui::{
     save_settings,
     stop_operation
 };
+use util::dump::Dump;
 use version::{version, version_info};
 
 fn main() {
@@ -117,6 +122,11 @@ fn main() {
         "save-captures", glib::Char::from(0),
         OptionFlags::NONE, OptionArg::None,
         "With --test-cynthion, saves captures from test.", None);
+    application.add_main_option(
+        "recover", glib::Char::from(0),
+        OptionFlags::NONE, OptionArg::Filename,
+        "Recover capture from a database dump",
+        Some("<directory>"));
 
     // Set up handling of command line options.
     application.connect_handle_local_options(|_app, options| {
@@ -132,6 +142,15 @@ fn main() {
             let save_captures: bool = options.contains("save-captures");
             test_cynthion(save_captures);
             ControlFlow::Break(ExitCode::SUCCESS)
+        } else if let Ok(Some(dir)) = options.lookup::<PathBuf>("recover") {
+            // Recover capture from database dump.
+            match recover(&dir) {
+                Ok(()) => ControlFlow::Break(ExitCode::SUCCESS),
+                Err(e) => {
+                    eprintln!("{e:?}");
+                    ControlFlow::Break(ExitCode::FAILURE)
+                }
+            }
         } else {
             // Continue with normal startup.
             ControlFlow::Continue(())
@@ -193,4 +212,14 @@ fn gtk_too_old(app: &(impl IsA<Application> + ApplicationExt)) {
     vbox.append(&label);
     vbox.append(&button);
     window.show();
+}
+
+// Recover a database dump.
+fn recover(dir: &PathBuf) -> Result<(), Error> {
+    let mut db = CounterSet::new();
+    let mut capture = CaptureReader::restore(&mut db, &dir)?;
+    for result in capture.timestamped_packets_and_events()? {
+        result?;
+    }
+    Ok(())
 }
